@@ -26,6 +26,7 @@ def init_db(db_path="tweets.db"):
 def save_tweets_to_db(tweets, user, db_path="tweets.db"):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
+    nuevos = []
     for t in tweets:
         try:
             cursor.execute("""
@@ -39,11 +40,13 @@ def save_tweets_to_db(tweets, user, db_path="tweets.db"):
                 t["content"],
                 datetime.now().isoformat()
             ))
+            nuevos.append(t)
         except sqlite3.IntegrityError:
             # Ya estaba
             continue
     conn.commit()
     conn.close()
+    return nuevos
 
 COOKIES_FILE = "twitter_cookies.json"
 
@@ -121,12 +124,12 @@ def scrape_twitter_with_cookies(username, max_tweets=5, max_idle_scrolls=10, mod
         context.add_cookies(cookies)
 
         # Ir al perfil
-        page.goto(f"https://x.com/{username}", timeout=15000)
+        page.goto(f"https://x.com/{username}", timeout=90000)
         if "login" in page.url:
             print("⚠️ La sesión expiró. Iniciá sesión nuevamente.")
             return []
 
-        page.wait_for_selector("[data-testid='tweet']", timeout=10000)
+        page.wait_for_selector("[data-testid='tweet']", timeout=90000)
 
         tweets = []
         tweet_ids = set()
@@ -185,7 +188,8 @@ def scrape_twitter_with_cookies(username, max_tweets=5, max_idle_scrolls=10, mod
 # Ejemplo de uso
 if __name__ == "__main__":
     # PASO 1: Ejecutar solo una vez para guardar cookies
-    # login_and_save_cookies()
+    login_and_save_cookies()
+    exit(0)
     
     # PASO 2: Scrapear usando cookies guardadas
     username = "dosinaga2"
@@ -199,5 +203,5 @@ if __name__ == "__main__":
 
     # Guardar en la base de datos
     init_db()
-    save_tweets_to_db(tweets, username)
-    print(f"\n✅ {len(tweets)} tweets guardados en la base de datos.")
+    nuevos_tweets = save_tweets_to_db(tweets, username)
+    print(f"\n✅ {len(nuevos_tweets)} tweets nuevos guardados en la base de datos.")
