@@ -5,6 +5,11 @@ import time
 import random
 import sqlite3
 from datetime import datetime
+import logging
+
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger(__name__)
 
 
 def init_db(db_path="tweets.db"):
@@ -28,6 +33,10 @@ def save_tweets_to_db(tweets, user, db_path="tweets.db"):
     cursor = conn.cursor()
     nuevos = []
     for t in tweets:
+        # Validar campos mínimos
+        if not t.get("url") or not t.get("date") or not t.get("content"):
+            logger.warning(f"Tweet inválido: {t}")
+            continue
         try:
             cursor.execute("""
                 INSERT INTO tweets (id, user, date, url, content, scraped_at)
@@ -44,6 +53,8 @@ def save_tweets_to_db(tweets, user, db_path="tweets.db"):
         except sqlite3.IntegrityError:
             # Ya estaba
             continue
+        except Exception as e:
+            logger.error(f"Error guardando tweet: {e} | {t}")
     conn.commit()
     conn.close()
     return nuevos
@@ -97,93 +108,109 @@ def move_mouse_randomly_over_tweet(page, tweet):
 
 def scrape_twitter_with_cookies(username, max_tweets=5, max_idle_scrolls=10, modo_humano=True):
     if not os.path.exists(COOKIES_FILE):
-        print("⚠️ No hay cookies guardadas. Ejecutá primero login_and_save_cookies()")
+        logger.error("⚠️ No hay cookies guardadas. Ejecutá primero login_and_save_cookies()")
         return []
 
-    with sync_playwright() as p:
-        #browser = p.chromium.launch(headless=False)
-        #context = browser.new_context()
+    browser = None
+    context = None
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+            (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+                viewport={"width": 1280, "height": 800},
+                device_scale_factor=1,
+                is_mobile=False,
+                has_touch=False,
+            )
+            page = context.new_page()
 
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--disable-blink-features=AutomationControlled"]
-        )
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-        (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
-            device_scale_factor=1,
-            is_mobile=False,
-            has_touch=False,
-        )
-        page = context.new_page()
+            # Cargar cookies
+            with open(COOKIES_FILE, "r") as f:
+                cookies = json.load(f)
+            context.add_cookies(cookies)
 
-        # Cargar cookies
-        with open(COOKIES_FILE, "r") as f:
-            cookies = json.load(f)
-        context.add_cookies(cookies)
+            # Ir al perfil
+            logger.info(f"Navegando a https://x.com/{username}")
+            page.goto(f"https://x.com/{username}", timeout=90000)
+            if "login" in page.url:
+                logger.error("⚠️ La sesión expiró. Iniciá sesión nuevamente.")
+                return []
 
-        # Ir al perfil
-        page.goto(f"https://x.com/{username}", timeout=90000)
-        if "login" in page.url:
-            print("⚠️ La sesión expiró. Iniciá sesión nuevamente.")
-            return []
+            page.wait_for_selector("[data-testid='tweet']", timeout=90000)
 
-        page.wait_for_selector("[data-testid='tweet']", timeout=90000)
+            tweets = []
+            tweet_ids = set()
+            idle_scrolls = 0
 
-        tweets = []
-        tweet_ids = set()
-        idle_scrolls = 0
+            while len(tweets) < max_tweets and idle_scrolls < max_idle_scrolls:
+                tweet_elements = page.query_selector_all("[data-testid='tweet']")
+                new_found = False
 
-        while len(tweets) < max_tweets and idle_scrolls < max_idle_scrolls:
-            tweet_elements = page.query_selector_all("[data-testid='tweet']")
-            new_found = False
+                for tweet in tweet_elements:
+                    try:
+                        link_el = tweet.query_selector('a[href*="/status/"]')
+                        content_el = tweet.query_selector("[data-testid='tweetText']")
+                        time_el = tweet.query_selector("time")
 
-            for tweet in tweet_elements:
-                try:
-                    link_el = tweet.query_selector('a[href*="/status/"]')
-                    content_el = tweet.query_selector("[data-testid='tweetText']")
-                    time_el = tweet.query_selector("time")
+                        if not (link_el and content_el and time_el):
+                            continue
 
-                    if not (link_el and content_el and time_el):
+                        link = link_el.get_attribute('href')
+                        tweet_id = link.split("/")[-1]
+                        if tweet_id in tweet_ids:
+                            continue
+
+                        tweet_data = {
+                            "content": content_el.inner_text(),
+                            "date": time_el.get_attribute("datetime"),
+                            "url": f"https://x.com{link}",
+                        }
+                        # Validar campos
+                        if not tweet_data["content"] or not tweet_data["date"] or not tweet_data["url"]:
+                            logger.warning(f"Tweet incompleto: {tweet_data}")
+                            continue
+                        tweets.append(tweet_data)
+                        tweet_ids.add(tweet_id)
+                        new_found = True
+
+                        if modo_humano:
+                            move_mouse_randomly_over_tweet(page, tweet)
+
+                        if len(tweets) >= max_tweets:
+                            break
+                    except Exception as e:
+                        logger.error(f"Error extrayendo tweet: {e}")
                         continue
 
-                    link = link_el.get_attribute('href')
-                    tweet_id = link.split("/")[-1]
-                    if tweet_id in tweet_ids:
-                        continue
-
-                    tweets.append({
-                        "content": content_el.inner_text(),
-                        "date": time_el.get_attribute("datetime"),
-                        "url": f"https://x.com{link}",
-                    })
-                    tweet_ids.add(tweet_id)
-                    new_found = True
-
-                    if modo_humano:
-                        move_mouse_randomly_over_tweet(page, tweet)
-
-                    if len(tweets) >= max_tweets:
-                        break
-                except:
-                    continue
-
-            if not new_found:
-                idle_scrolls += 1
-            else:
-                idle_scrolls = 0
-
-            if len(tweets) < max_tweets and idle_scrolls < max_idle_scrolls:
-                if modo_humano:
-                    scroll_like_human(page)
+                if not new_found:
+                    idle_scrolls += 1
                 else:
-                    page.evaluate("window.scrollBy(0, window.innerHeight)")
-                    time.sleep(random.uniform(1.5, 3.0))
+                    idle_scrolls = 0
 
-        browser.close()
-        return tweets
-
+                if len(tweets) < max_tweets and idle_scrolls < max_idle_scrolls:
+                    if modo_humano:
+                        scroll_like_human(page)
+                    else:
+                        page.evaluate("window.scrollBy(0, window.innerHeight)")
+                        time.sleep(random.uniform(1.5, 3.0))
+            logger.info(f"Scraping terminado. Tweets extraídos: {len(tweets)}")
+            return tweets
+    except Exception as e:
+        logger.error(f"Error general en scrape_twitter_with_cookies: {e}")
+        return []
+    finally:
+        try:
+            if context:
+                context.close()
+            if browser:
+                browser.close()
+        except Exception as e:
+            logger.warning(f"Error cerrando browser/context: {e}")
 
 # Ejemplo de uso
 if __name__ == "__main__":

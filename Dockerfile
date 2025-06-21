@@ -1,16 +1,21 @@
 FROM python:3.11-slim
 
-WORKDIR /app
 ENV TZ=America/Argentina/Buenos_Aires
+WORKDIR /app
 
-RUN apt-get update && apt-get install -y wget curl git libnss3 libatk-bridge2.0-0 libxss1 libasound2 libxcomposite1 libxrandr2 libgtk-3-0 libgbm-dev tzdata
+RUN apt-get update && apt-get install -y \
+    libnss3 libatk-bridge2.0-0 libxss1 libasound2 libxcomposite1 \
+    libxrandr2 libgtk-3-0 libgbm-dev tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir playwright flask apscheduler
+COPY requirements.txt .
 
-RUN python -m playwright install --with-deps
+RUN pip install --no-cache-dir -r requirements.txt
+
+RUN python -m playwright install chromium
 
 COPY . .
 
 EXPOSE 5000
 
-CMD ["python", "server.py"]
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "server:app"]
