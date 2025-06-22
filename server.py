@@ -1,7 +1,7 @@
 import os
 import logging
 from flask import Flask, jsonify, request
-from scraper import scrape_twitter_with_cookies, init_db, save_tweets_to_db, get_tweets_from_db, clear_tweets_in_db
+from scraper import scrape_twitter_with_cookies, init_db, save_tweets_to_db, get_tweets_from_db, clear_tweets_in_db, scrape_twitter_new_only
 import threading
 import requests
 from dotenv import load_dotenv
@@ -60,7 +60,7 @@ def run_scraper(user_configs=None):
                 if isinstance(modo_humano, str):
                     modo_humano = modo_humano.lower() in ("1", "true", "yes")
                 logger.info(f"Scrapeando @{username}... (max_tweets={max_tweets}, max_idle_scrolls={max_idle_scrolls}, modo_humano={modo_humano})")
-                tweets = scrape_twitter_with_cookies(
+                tweets = scrape_twitter_new_only(
                     username,
                     max_tweets=max_tweets,
                     max_idle_scrolls=max_idle_scrolls,
