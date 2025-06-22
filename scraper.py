@@ -22,7 +22,9 @@ def init_db(db_path="tweets.db"):
             date TEXT,
             url TEXT,
             content TEXT,
-            scraped_at TEXT
+            scraped_at TEXT,
+            is_retweet INTEGER,
+            has_image INTEGER
         )
     """)
     conn.commit()
@@ -39,15 +41,17 @@ def save_tweets_to_db(tweets, user, db_path="tweets.db"):
             continue
         try:
             cursor.execute("""
-                INSERT INTO tweets (id, user, date, url, content, scraped_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO tweets (id, user, date, url, content, scraped_at, is_retweet, has_image)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 t["url"].split("/")[-1],
                 user,
                 t["date"],
                 t["url"],
                 t["content"],
-                datetime.now().isoformat()
+                datetime.now().isoformat(),
+                int(t.get("is_retweet", False)),
+                int(t.get("has_image", False))
             ))
             nuevos.append(t)
         except sqlite3.IntegrityError:
@@ -134,7 +138,6 @@ def scrape_twitter_with_cookies(username, max_tweets=5, max_idle_scrolls=10, mod
                 cookies = json.load(f)
             context.add_cookies(cookies)
 
-            # Ir al perfil
             logger.info(f"Navegando a https://x.com/{username}")
             page.goto(f"https://x.com/{username}", timeout=90000)
             if "login" in page.url:
@@ -156,6 +159,10 @@ def scrape_twitter_with_cookies(username, max_tweets=5, max_idle_scrolls=10, mod
                         link_el = tweet.query_selector('a[href*="/status/"]')
                         content_el = tweet.query_selector("[data-testid='tweetText']")
                         time_el = tweet.query_selector("time")
+                        # Detectar retweet
+                        is_retweet = bool(tweet.query_selector('svg[data-testid="retweet"]'))
+                        # Detectar imagen
+                        has_image = bool(tweet.query_selector('img[src*="twimg.com/media/"]'))
 
                         if not (link_el and content_el and time_el):
                             continue
@@ -169,6 +176,8 @@ def scrape_twitter_with_cookies(username, max_tweets=5, max_idle_scrolls=10, mod
                             "content": content_el.inner_text(),
                             "date": time_el.get_attribute("datetime"),
                             "url": f"https://x.com{link}",
+                            "is_retweet": is_retweet,
+                            "has_image": has_image
                         }
                         # Validar campos
                         if not tweet_data["content"] or not tweet_data["date"] or not tweet_data["url"]:
@@ -211,6 +220,35 @@ def scrape_twitter_with_cookies(username, max_tweets=5, max_idle_scrolls=10, mod
                 browser.close()
         except Exception as e:
             logger.warning(f"Error cerrando browser/context: {e}")
+
+def get_tweets_from_db(db_path="tweets.db"):
+    """Devuelve todos los tweets almacenados en la base de datos como lista de dicts."""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, user, date, url, content, scraped_at, is_retweet, has_image FROM tweets ORDER BY scraped_at DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    tweets = []
+    for row in rows:
+        tweets.append({
+            "id": row[0],
+            "user": row[1],
+            "date": row[2],
+            "url": row[3],
+            "content": row[4],
+            "scraped_at": row[5],
+            "is_retweet": bool(row[6]),
+            "has_image": bool(row[7])
+        })
+    return tweets
+
+def clear_tweets_in_db(db_path="tweets.db"):
+    """Elimina todos los tweets de la base de datos."""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM tweets")
+    conn.commit()
+    conn.close()
 
 # Ejemplo de uso
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 import os
 import logging
-from flask import Flask, jsonify
-from scraper import scrape_twitter_with_cookies, init_db, save_tweets_to_db
+from flask import Flask, jsonify, request
+from scraper import scrape_twitter_with_cookies, init_db, save_tweets_to_db, get_tweets_from_db, clear_tweets_in_db
 import threading
 import requests
 from dotenv import load_dotenv
@@ -14,15 +14,12 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL")
 N8N_AUTH_HEADER = os.getenv("N8N_AUTH_HEADER")
-USERS_CDN_URL = os.getenv("USERS_CDN_URL")
 MAX_TWEETS = int(os.getenv("MAX_TWEETS", 15))
 MAX_IDLE_SCROLLS = int(os.getenv("MAX_IDLE_SCROLLS", 2))
 MODO_HUMANO = os.getenv("MODO_HUMANO", "true").lower() in ("1", "true", "yes")
 
 app = Flask(__name__)
 lock = threading.Lock()
-
-tweets_cache = []
 
 
 def send_to_n8n(tweets):
@@ -43,48 +40,48 @@ def send_to_n8n(tweets):
         return False
 
 
-def get_usernames_from_cdn():
-    try:
-        res = requests.get(USERS_CDN_URL, timeout=10)
-        res.raise_for_status()
-        lines = res.text.splitlines()
-        usernames = [line.strip() for line in lines if line.strip() and not line.strip().startswith("#")]
-        logger.info(f"Usuarios obtenidos del CDN: {usernames}")
-        return usernames
-    except Exception as e:
-        logger.error(f"No se pudo obtener la lista de usuarios del CDN: {e}")
-        return []
-
-
-def run_scraper():
-    global tweets_cache
+def run_scraper(user_configs=None):
     with lock:
         logger.info("Ejecutando scrapeo programado/manual...")
         nuevos_todos = []
         try:
-            usernames = get_usernames_from_cdn()
-            if not usernames:
-                logger.error("No hay usuarios para scrapear. Abortando.")
-                return
             init_db()
-            for username in usernames:
-                logger.info(f"Scrapeando @{username}... (max_tweets={MAX_TWEETS}, max_idle_scrolls={MAX_IDLE_SCROLLS}, modo_humano={MODO_HUMANO})")
+            if user_configs is None:
+                # Si tienes una lista legacy de usuarios, ponla aquí, o lanza error si no hay
+                logger.error("No hay usuarios configurados para scrapeo automático. Debes pasar user_configs.")
+                return
+            for user_cfg in user_configs:
+                username = user_cfg.get("username")
+                if not username:
+                    continue
+                max_tweets = int(user_cfg.get("max_tweets", MAX_TWEETS))
+                max_idle_scrolls = int(user_cfg.get("max_idle_scrolls", MAX_IDLE_SCROLLS))
+                modo_humano = user_cfg.get("modo_humano", MODO_HUMANO)
+                if isinstance(modo_humano, str):
+                    modo_humano = modo_humano.lower() in ("1", "true", "yes")
+                logger.info(f"Scrapeando @{username}... (max_tweets={max_tweets}, max_idle_scrolls={max_idle_scrolls}, modo_humano={modo_humano})")
                 tweets = scrape_twitter_with_cookies(
-                    username, max_tweets=MAX_TWEETS, max_idle_scrolls=MAX_IDLE_SCROLLS, modo_humano=MODO_HUMANO
+                    username,
+                    max_tweets=max_tweets,
+                    max_idle_scrolls=max_idle_scrolls,
+                    modo_humano=modo_humano
                 )
                 nuevos = save_tweets_to_db(tweets, username)
                 logger.info(f"{len(nuevos)} nuevos tweets")
                 nuevos_todos.extend(nuevos)
-            tweets_cache = nuevos_todos
             if nuevos_todos:
                 send_to_n8n(nuevos_todos)
         except Exception as e:
             logger.error(f"Error en run_scraper: {e}")
 
+
 @app.route("/scrape", methods=["POST"])
 def manual_scrape():
     try:
-        thread = threading.Thread(target=run_scraper)
+        data = request.get_json(force=True)
+        if not isinstance(data, list):
+            return jsonify({"error": "El body debe ser una lista de usuarios con parámetros"}), 400
+        thread = threading.Thread(target=run_scraper, args=(data,))
         thread.start()
         return jsonify({"status": "scrape iniciado"}), 202
     except Exception as e:
@@ -94,17 +91,21 @@ def manual_scrape():
 @app.route("/tweets", methods=["GET"])
 def get_tweets():
     try:
-        return jsonify(tweets_cache), 200
+        tweets = get_tweets_from_db()
+        return jsonify(tweets), 200
     except Exception as e:
         logger.error(f"Error en get_tweets: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/clear_cache", methods=["POST"])
 def clear_cache():
-    global tweets_cache
-    tweets_cache = []
-    logger.info("Cache de tweets limpiada manualmente")
-    return jsonify({"status": "cache limpiada"}), 200
+    try:
+        clear_tweets_in_db()
+        logger.info("Tweets borrados de la base de datos")
+        return jsonify({"status": "tweets borrados de la base de datos"}), 200
+    except Exception as e:
+        logger.error(f"Error al borrar tweets: {e}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     run_scraper()  # primer scrape inmediato
