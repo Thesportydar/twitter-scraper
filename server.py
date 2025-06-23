@@ -1,7 +1,7 @@
 import os
 import logging
 from flask import Flask, jsonify, request
-from scraper import scrape_twitter_with_cookies, init_db, save_tweets_to_db, get_tweets_from_db, clear_tweets_in_db, scrape_twitter_new_only
+from scraper import scrape_multiple_users_with_cookies, init_db, get_tweets_from_db, clear_tweets_in_db
 import threading
 import requests
 from dotenv import load_dotenv
@@ -14,9 +14,6 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL")
 N8N_AUTH_HEADER = os.getenv("N8N_AUTH_HEADER")
-MAX_TWEETS = int(os.getenv("MAX_TWEETS", 15))
-MAX_IDLE_SCROLLS = int(os.getenv("MAX_IDLE_SCROLLS", 2))
-MODO_HUMANO = os.getenv("MODO_HUMANO", "true").lower() in ("1", "true", "yes")
 
 app = Flask(__name__)
 lock = threading.Lock()
@@ -47,28 +44,10 @@ def run_scraper(user_configs=None):
         try:
             init_db()
             if user_configs is None:
-                # Si tienes una lista legacy de usuarios, ponla aquí, o lanza error si no hay
                 logger.error("No hay usuarios configurados para scrapeo automático. Debes pasar user_configs.")
                 return
-            for user_cfg in user_configs:
-                username = user_cfg.get("username")
-                if not username:
-                    continue
-                max_tweets = int(user_cfg.get("max_tweets", MAX_TWEETS))
-                max_idle_scrolls = int(user_cfg.get("max_idle_scrolls", MAX_IDLE_SCROLLS))
-                modo_humano = user_cfg.get("modo_humano", MODO_HUMANO)
-                if isinstance(modo_humano, str):
-                    modo_humano = modo_humano.lower() in ("1", "true", "yes")
-                logger.info(f"Scrapeando @{username}... (max_tweets={max_tweets}, max_idle_scrolls={max_idle_scrolls}, modo_humano={modo_humano})")
-                tweets = scrape_twitter_new_only(
-                    username,
-                    max_tweets=max_tweets,
-                    max_idle_scrolls=max_idle_scrolls,
-                    modo_humano=modo_humano
-                )
-                nuevos = save_tweets_to_db(tweets, username)
-                logger.info(f"{len(nuevos)} nuevos tweets")
-                nuevos_todos.extend(nuevos)
+            
+            nuevos_todos = scrape_multiple_users_with_cookies(user_configs)
             if nuevos_todos:
                 send_to_n8n(nuevos_todos)
         except Exception as e:

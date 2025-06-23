@@ -94,25 +94,27 @@ const header = `
 
 const footer = `
 📌 INSTRUCCIONES ADICIONALES:
-- Evita suposiciones no basadas en los tweets.
-- No repitas información sin valor informativo.
-- El objetivo es ayudar a un inversor real a decidir en un entorno volátil de corto plazo.
-- Algunos tweets pueden depender de imágenes o capturas no disponibles. Si el texto es muy vago o ambiguo, ignóralo o mencionalo como potencialmente fuera de contexto.
-
+- No hagas suposiciones que no estén respaldadas por el contenido de los tweets.
+- Ignorá información irrelevante o redundante; enfocate en lo que aporta valor al análisis.
+- Recordá que el objetivo es ayudar a un inversor real a tomar decisiones en un entorno volátil y de corto plazo.
+- Si un tweet está marcado como [Contiene imagen/s], puede haber información importante en la imagen que no está en el texto.
+- Si está marcado como [RETWEET por @usuario], tené en cuenta que @usuario está amplificando un mensaje de otro autor.
+- Tweets vagos o ambiguos (especialmente si dependen de imágenes o capturas) deben ser ignorados o señalados como fuera de contexto.
 `;
 
 // --- TWEETS ---
 const tweets = items.map((item, i) => {
-  const autor = item.json.url.match(/x\.com\/(.*?)\//)?.[1] || "desconocido";
+  const autorOriginal = item.json.url.match(/x\.com\/(.*?)\//)?.[1] || "desconocido";
   const fecha = new Date(item.json.date).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
-  return `Tweet de @${autor} #${i + 1} - Publicado el ${fecha}:\n${item.json.content.replace(/\\n/g, ' ')}`;
-}).join('\\n\\n');
+  const tieneImagen = item.json.has_image ? " - [Contiene imagen/s]" : "";
+  const prefijo = item.json.is_retweet ? ` - [RETWEET por @${item.json.user || "desconocido"}] ` : "";
+
+  return `Tweet de @${autorOriginal} #${i + 1} - Publicado el ${fecha}${tieneImagen}${prefijo}\n${item.json.content.replace(/\n/g, ' ')}`;
+}).join('\n\n');
 
 let prompt = '';
-let horario = '';
 
 if (tipoHoy.tipo.includes('Feriado') || tipoHoy.tipo.includes('Fin de semana')) {
-    horario = 'Feriado';
     prompt = `
 ⚠️ Hoy es un día no hábil para los mercados argentinos o estadounidenses (feriado o fin de semana). Aun así, tu rol como analista de research de una reconocida ALyC argentina sigue siendo clave: tu tarea es analizar los siguientes tweets y elaborar un informe que permita anticipar el clima con el que podría abrir el mercado el próximo día hábil.
 
@@ -152,7 +154,6 @@ ${tweets}
 `;
 }
 else if (tipoHoy.tipo === 'Pre-Market') {
-  horario = 'Pre-Market';
   prompt = `
 Eres un analista de research de una reconocida ALyC argentina. Tu tarea es analizar los siguientes tweets, que fueron publicados desde el cierre de ayer hasta ahora, y generar un reporte "pre-mercado" para un inversor. El objetivo es anticipar el clima de la apertura.
 
@@ -185,7 +186,6 @@ TWEETS A ANALIZAR:
 ${tweets}
 `
 } else if (tipoHoy.tipo === 'Intra-Day') {
-  horario = 'Intra-Day';
   prompt = `
 Eres un analista de research de una reconocida ALyC argentina. Son las 12:00 PM y el mercado ya está operando. Tu tarea es analizar los siguientes tweets, que reflejan lo que está pasando AHORA, y generar un reporte de "media rueda".
 
@@ -218,7 +218,6 @@ TWEETS A ANALIZAR:
 ${tweets}    
 `;
 } else {
-  horario = 'Post-Market';
   prompt = `
 Eres un analista de research de una reconocida ALyC argentina. La rueda ya cerró. Tu tarea es analizar los tweets del día y generar un reporte de "cierre de mercado" que sirva como balance y preparación para mañana.
 
