@@ -7,6 +7,10 @@ import sqlite3
 from datetime import datetime
 import logging
 from dotenv import load_dotenv
+import asyncio
+from playwright.async_api import async_playwright
+from playwright_stealth import Stealth
+import collections
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -172,168 +176,36 @@ def get_latest_tweet_ids_from_db(username, limit=20, db_path="tweets.db"):
     conn.close()
     return set(ids)
 
-def scrape_twitter_new_only(username, max_tweets=15, max_idle_scrolls=2, modo_humano=True, max_consecutive_known=5, db_path="tweets.db"):
+async def async_scrape_multiple_users_with_stealth(user_configs, max_consecutive_known=5, db_path="tweets.db"):
     """
-    Scrapea tweets de un usuario, pero corta si encuentra varios tweets consecutivos ya existentes en la BD.
-    Devuelve solo los tweets nuevos.
-    """
-    latest_ids = get_latest_tweet_ids_from_db(username, limit=30, db_path=db_path)
-    if not os.path.exists(COOKIES_FILE):
-        logger.error("⚠️ No hay cookies guardadas. Ejecutá primero login_and_save_cookies()")
-        return []
-
-    browser = None
-    context = None
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=HEADLESS,
-                args=["--disable-blink-features=AutomationControlled"]
-            )
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-            (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 800},
-                device_scale_factor=1,
-                is_mobile=False,
-                has_touch=False,
-            )
-            page = context.new_page()
-
-            # Cargar cookies
-            with open(COOKIES_FILE, "r") as f:
-                cookies = json.load(f)
-            context.add_cookies(cookies)
-
-            logger.info(f"Navegando a https://x.com/{username}")
-            page.goto(f"https://x.com/{username}", timeout=90000)
-            if "login" in page.url:
-                logger.error("⚠️ La sesión expiró. Iniciá sesión nuevamente.")
-                return []
-
-            page.wait_for_selector("[data-testid='tweet']", timeout=90000)
-
-            tweets = []
-            tweet_ids = set()
-            idle_scrolls = 0
-            consecutive_known = 0
-
-            while len(tweets) < max_tweets and idle_scrolls < max_idle_scrolls and consecutive_known < max_consecutive_known:
-                tweet_elements = page.query_selector_all("[data-testid='tweet']")
-                new_found = False
-
-                for tweet in tweet_elements:
-                    try:
-                        link_el = tweet.query_selector('a[href*="/status/"]')
-                        content_el = tweet.query_selector("[data-testid='tweetText']")
-                        time_el = tweet.query_selector("time")
-                        # Detectar retweet (nuevo método robusto)
-                        social_context = tweet.query_selector('span[data-testid="socialContext"]')
-                        is_retweet = False
-                        if social_context:
-                            text = social_context.inner_text().lower()
-                            if "reposteó" in text or "retweeted" in text:
-                                is_retweet = True
-                        # Detectar imagen
-                        has_image = bool(tweet.query_selector('img[src*="twimg.com/media/"]'))
-
-                        if not (link_el and content_el and time_el):
-                            continue
-
-                        link = link_el.get_attribute('href')
-                        tweet_id = link.split("/")[-1]
-                        if tweet_id in tweet_ids:
-                            continue
-                        if tweet_id in latest_ids:
-                            consecutive_known += 1
-                            logger.debug(f"Tweet ya conocido: {tweet_id} ({consecutive_known} consecutivos)")
-                            if consecutive_known >= max_consecutive_known:
-                                logger.info(f"Encontrados {max_consecutive_known} tweets consecutivos ya existentes. Finalizando scraping.")
-                                break
-                            continue
-                        else:
-                            consecutive_known = 0
-
-                        tweet_data = {
-                            "content": content_el.inner_text(),
-                            "date": time_el.get_attribute("datetime"),
-                            "url": f"https://x.com{link}",
-                            "is_retweet": is_retweet,
-                            "has_image": has_image
-                        }
-                        if not tweet_data["content"] or not tweet_data["date"] or not tweet_data["url"]:
-                            logger.warning(f"Tweet incompleto: {tweet_data}")
-                            continue
-                        tweets.append(tweet_data)
-                        tweet_ids.add(tweet_id)
-                        new_found = True
-
-                        if modo_humano:
-                            move_mouse_randomly_over_tweet(page, tweet)
-
-                        if len(tweets) >= max_tweets:
-                            break
-                    except Exception as e:
-                        logger.error(f"Error extrayendo tweet: {e}")
-                        continue
-
-                if not new_found:
-                    idle_scrolls += 1
-                else:
-                    idle_scrolls = 0
-
-                if len(tweets) < max_tweets and idle_scrolls < max_idle_scrolls and consecutive_known < max_consecutive_known:
-                    if modo_humano:
-                        scroll_like_human(page)
-                    else:
-                        page.evaluate("window.scrollBy(0, window.innerHeight)")
-                        time.sleep(random.uniform(1.5, 3.0))
-            logger.info(f"Scraping terminado. Tweets extraídos: {len(tweets)}")
-            return tweets
-    except Exception as e:
-        logger.error(f"Error general en scrape_twitter_new_only: {e}")
-        return []
-    finally:
-        try:
-            if context:
-                context.close()
-            if browser:
-                browser.close()
-        except Exception as e:
-            logger.warning(f"Error cerrando browser/context: {e}")
-
-def scrape_multiple_users_with_cookies(user_configs, max_consecutive_known=5, db_path="tweets.db"):
-    """
-    Scrapea varios usuarios en una sola sesión de Playwright, devolviendo los tweets nuevos de todos.
+    Scrapea varios usuarios en una sola sesión de Playwright usando playwright-stealth (async), devolviendo los tweets nuevos de todos.
     user_configs: lista de dicts con username, max_tweets, max_idle_scrolls, modo_humano
     """
     if not os.path.exists(COOKIES_FILE):
         logger.error("⚠️ No hay cookies guardadas. Ejecutá primero login_and_save_cookies()")
         return []
 
+    todos_nuevos = []
     browser = None
     context = None
-    todos_nuevos = []
+    page = None
+    # --- FIFO queue y contador de reintentos por usuario ---
+    user_cfgs_random = user_configs[:]
+    random.shuffle(user_cfgs_random)
+    user_queue = collections.deque(user_cfgs_random)
+    retry_counts = {cfg.get("username"): 0 for cfg in user_cfgs_random if cfg.get("username")}
+    max_retries = 2
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=HEADLESS,
-                args=["--disable-blink-features=AutomationControlled"]
-            )
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
-            (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 800},
-                device_scale_factor=1,
-                is_mobile=False,
-                has_touch=False,
-            )
+        async with Stealth().use_async(async_playwright()) as p:
+            browser = await p.chromium.launch(headless=HEADLESS)
+            context = await browser.new_context()
             # Cargar cookies
             with open(COOKIES_FILE, "r") as f:
                 cookies = json.load(f)
-            context.add_cookies(cookies)
-
-            for user_cfg in user_configs:
+            await context.add_cookies(cookies)
+            page = await context.new_page()
+            while user_queue:
+                user_cfg = user_queue.popleft()
                 username = user_cfg.get("username")
                 if not username:
                     continue
@@ -343,40 +215,54 @@ def scrape_multiple_users_with_cookies(user_configs, max_consecutive_known=5, db
                 if isinstance(modo_humano, str):
                     modo_humano = modo_humano.lower() in ("1", "true", "yes")
                 logger.info(f"Scrapeando @{username}... (max_tweets={max_tweets}, max_idle_scrolls={max_idle_scrolls}, modo_humano={modo_humano})")
-
                 latest_ids = get_latest_tweet_ids_from_db(username, limit=30, db_path=db_path)
-                page = context.new_page()
+                retries = retry_counts.get(username, 0)
                 try:
-                    page.goto(f"https://x.com/{username}", timeout=90000)
-                    if "login" in page.url:
-                        logger.error("⚠️ La sesión expiró. Iniciá sesión nuevamente.")
-                        continue
-                    page.wait_for_selector("[data-testid='tweet']", timeout=90000)
-
+                    await page.goto(f"https://x.com/{username}", timeout=120000)
+                    logger.info(f"URL tras goto: {page.url}")
+                    # Si la URL no contiene el username, probablemente hubo redirección
+                    if (username.lower() not in page.url.lower()) or any(x in page.url for x in ["login", "unsupported-browser", "consent", "challenge", "error"]):
+                        logger.error(f"⚠️ Redirección/bloqueo detectado para @{username} (url: {page.url}). Saltando usuario y recreando contexto.")
+                        await page.close()
+                        await context.close()
+                        context = await browser.new_context()
+                        await context.add_cookies(cookies)
+                        page = await context.new_page()
+                        raise Exception("Redirección/bloqueo detectado")
+                    try:
+                        await page.wait_for_selector("[data-testid='tweet']", timeout=30000, state="visible")
+                    except Exception as e:
+                        logger.error(f"No se encontró el selector de tweets para @{username} (url: {page.url}). Error: {e}. Saltando usuario y recreando contexto.")
+                        await page.close()
+                        await context.close()
+                        context = await browser.new_context()
+                        await context.add_cookies(cookies)
+                        page = await context.new_page()
+                        raise Exception("No se encontró el selector de tweets")
+                    #logger.info(f"Esperando tweets de @{username}...")
+                    await asyncio.sleep(random.uniform(1.0, 3.0))
                     tweets = []
                     tweet_ids = set()
                     idle_scrolls = 0
                     consecutive_known = 0
-
                     while len(tweets) < max_tweets and idle_scrolls < max_idle_scrolls and consecutive_known < max_consecutive_known:
-                        tweet_elements = page.query_selector_all("[data-testid='tweet']")
+                        tweet_elements = await page.query_selector_all("[data-testid='tweet']")
                         new_found = False
                         for tweet in tweet_elements:
                             try:
-                                link_el = tweet.query_selector('a[href*="/status/"]')
-                                content_el = tweet.query_selector("[data-testid='tweetText']")
-                                time_el = tweet.query_selector("time")
-                                # Detectar retweet (nuevo método robusto)
-                                social_context = tweet.query_selector('span[data-testid="socialContext"]')
+                                link_el = await tweet.query_selector('a[href*="/status/"]')
+                                content_el = await tweet.query_selector("[data-testid='tweetText']")
+                                time_el = await tweet.query_selector("time")
+                                social_context = await tweet.query_selector('span[data-testid="socialContext"]')
                                 is_retweet = False
                                 if social_context:
-                                    text = social_context.inner_text().lower()
+                                    text = (await social_context.inner_text()).lower()
                                     if "reposteó" in text or "retweeted" in text:
                                         is_retweet = True
-                                has_image = bool(tweet.query_selector('img[src*="twimg.com/media/"]'))
+                                has_image = bool(await tweet.query_selector('img[src*="twimg.com/media/"]'))
                                 if not (link_el and content_el and time_el):
                                     continue
-                                link = link_el.get_attribute('href')
+                                link = await link_el.get_attribute('href')
                                 tweet_id = link.split("/")[-1]
                                 if tweet_id in tweet_ids:
                                     continue
@@ -389,8 +275,8 @@ def scrape_multiple_users_with_cookies(user_configs, max_consecutive_known=5, db
                                 else:
                                     consecutive_known = 0
                                 tweet_data = {
-                                    "content": content_el.inner_text(),
-                                    "date": time_el.get_attribute("datetime"),
+                                    "content": await content_el.inner_text(),
+                                    "date": await time_el.get_attribute("datetime"),
                                     "url": f"https://x.com{link}",
                                     "is_retweet": is_retweet,
                                     "has_image": has_image
@@ -401,8 +287,8 @@ def scrape_multiple_users_with_cookies(user_configs, max_consecutive_known=5, db
                                 tweets.append(tweet_data)
                                 tweet_ids.add(tweet_id)
                                 new_found = True
-                                if modo_humano:
-                                    move_mouse_randomly_over_tweet(page, tweet)
+                                if modo_humano or random.random() < 0.3:
+                                    await asyncio.sleep(random.uniform(0.15, 0.5))
                                 if len(tweets) >= max_tweets:
                                     break
                             except Exception as e:
@@ -413,28 +299,43 @@ def scrape_multiple_users_with_cookies(user_configs, max_consecutive_known=5, db
                         else:
                             idle_scrolls = 0
                         if len(tweets) < max_tweets and idle_scrolls < max_idle_scrolls and consecutive_known < max_consecutive_known:
-                            if modo_humano:
-                                scroll_like_human(page)
+                            if modo_humano or random.random() < 0.2:
+                                await asyncio.sleep(random.uniform(1.0, 2.0))
                             else:
-                                page.evaluate("window.scrollBy(0, window.innerHeight)")
-                                time.sleep(random.uniform(1.5, 3.0))
+                                await page.evaluate("window.scrollBy(0, window.innerHeight)")
+                                await asyncio.sleep(random.uniform(1.5, 3.0))
                     nuevos = save_tweets_to_db(tweets, username, db_path=db_path)
                     logger.info(f"{len(nuevos)} nuevos tweets para @{username}")
                     todos_nuevos.extend(nuevos)
                 except Exception as e:
-                    logger.error(f"Error scrapeando @{username}: {e}")
-                finally:
-                    page.close()
+                    logger.error(f"Error scrapeando @{username} (intento {retries+1}): {e}")
+                    # try:
+                    #     screenshot_path = f"screenshot_{username}_{int(time.time())}.png"
+                    #     await page.screenshot(path=screenshot_path)
+                    #     logger.error(f"Captura de pantalla guardada: {screenshot_path}")
+                    # except Exception as se:
+                    #     logger.error(f"No se pudo guardar screenshot: {se}")
+                    retries += 1
+                    retry_counts[username] = retries
+                    if retries <= max_retries:
+                        logger.info(f"Reinsertando @{username} al final de la cola (reintento {retries}/{max_retries})...")
+                        user_queue.append(user_cfg)
+                    else:
+                        logger.error(f"Fallo definitivo scrapeando @{username}")
+                    # Espera antes de reintentar
+                    await asyncio.sleep(5 + 5*retries)
             return todos_nuevos
     except Exception as e:
-        logger.error(f"Error general en scrape_multiple_users_with_cookies: {e}")
+        logger.error(f"Error general en async_scrape_multiple_users_with_stealth: {e}")
         return []
     finally:
         try:
+            if page:
+                await page.close()
             if context:
-                context.close()
+                await context.close()
             if browser:
-                browser.close()
+                await browser.close()
         except Exception as e:
             logger.warning(f"Error cerrando browser/context: {e}")
 

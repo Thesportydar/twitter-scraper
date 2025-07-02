@@ -1,10 +1,11 @@
 import os
 import logging
 from flask import Flask, jsonify, request
-from scraper import scrape_multiple_users_with_cookies, init_db, get_tweets_from_db, clear_tweets_in_db
 import threading
 import requests
 from dotenv import load_dotenv
+import asyncio
+from scraper import async_scrape_multiple_users_with_stealth, init_db, get_tweets_from_db, clear_tweets_in_db
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -46,8 +47,8 @@ def run_scraper(user_configs=None):
             if user_configs is None:
                 logger.error("No hay usuarios configurados para scrapeo automático. Debes pasar user_configs.")
                 return
-            
-            nuevos_todos = scrape_multiple_users_with_cookies(user_configs)
+            # Usar la versión async con stealth
+            nuevos_todos = asyncio.run(async_scrape_multiple_users_with_stealth(user_configs))
             if nuevos_todos:
                 send_to_n8n(nuevos_todos)
         except Exception as e:
