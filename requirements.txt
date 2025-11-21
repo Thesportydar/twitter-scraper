@@ -1,6 +1,3 @@
-flask
-requests
-python-dotenv
 playwright
-gunicorn
 playwright-stealth
+boto3

@@ -16,6 +16,4 @@ RUN python -m playwright install chromium
 
 COPY . .
 
-EXPOSE 5000
-
-CMD ["gunicorn", "-w", "1", "-b", "0.0.0.0:5001", "server:app"]
+CMD ["python", "main.py"]

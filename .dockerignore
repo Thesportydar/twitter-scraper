@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+.DS_Store
+.git
+.gitignore
+README.md
+tweets.db
+twitter_cookies.json
+*.log

@@ -3,10 +3,10 @@ import json
 import os
 import time
 import random
-import sqlite3
-from datetime import datetime
+import boto3
+from boto3.dynamodb.conditions import Key
+from datetime import datetime, timedelta
 import logging
-from dotenv import load_dotenv
 import asyncio
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
@@ -16,79 +16,159 @@ import collections
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
-load_dotenv()
-
 MAX_TWEETS = int(os.getenv("MAX_TWEETS", 15))
 MAX_IDLE_SCROLLS = int(os.getenv("MAX_IDLE_SCROLLS", 2))
 MODO_HUMANO = os.getenv("MODO_HUMANO", "true").lower() in ("1", "true", "yes")
-COOKIES_FILE = "twitter_cookies.json"
+MODO_HUMANO = os.getenv("MODO_HUMANO", "true").lower() in ("1", "true", "yes")
+# COOKIES_FILE removed
 HEADLESS = os.getenv("HEADLESS", "true").lower() in ("1", "true", "yes")
+HEADLESS = os.getenv("HEADLESS", "true").lower() in ("1", "true", "yes")
+DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", "Tweet")
 
-def init_db(db_path="tweets.db"):
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tweets (
-            id TEXT PRIMARY KEY,
-            user TEXT,
-            date TEXT,
-            url TEXT,
-            content TEXT,
-            scraped_at TEXT,
-            is_retweet INTEGER,
-            has_image INTEGER
+def init_db():
+    """Inicializa la tabla de DynamoDB si no existe."""
+    dynamodb = boto3.resource('dynamodb')
+    try:
+        table = dynamodb.create_table(
+            TableName=DYNAMODB_TABLE,
+            KeySchema=[{'AttributeName': 'Id', 'KeyType': 'HASH'}],
+            AttributeDefinitions=[
+                {'AttributeName': 'Id', 'AttributeType': 'S'},
+                {'AttributeName': 'User', 'AttributeType': 'S'},
+                {'AttributeName': 'ScrapedAt', 'AttributeType': 'S'}
+            ],
+            GlobalSecondaryIndexes=[{
+                'IndexName': 'UserIndex',
+                'KeySchema': [
+                    {'AttributeName': 'User', 'KeyType': 'HASH'},
+                    {'AttributeName': 'ScrapedAt', 'KeyType': 'RANGE'}
+                ],
+                'Projection': {'ProjectionType': 'ALL'}
+            }],
+            BillingMode='PAY_PER_REQUEST'
         )
-    """)
-    conn.commit()
-    conn.close()
+        print(f"Creando tabla {DYNAMODB_TABLE}...")
+        table.wait_until_exists()
+        
+        # Habilitar TTL
+        client = boto3.client('dynamodb')
+        client.update_time_to_live(
+            TableName=DYNAMODB_TABLE,
+            TimeToLiveSpecification={
+                'Enabled': True,
+                'AttributeName': 'ExpireAt'
+            }
+        )
+        print(f"Tabla {DYNAMODB_TABLE} creada con TTL.")
+    except Exception as e:
+        if "ResourceInUseException" in str(e):
+            pass
+        else:
+            logger.error(f"Error inicializando DynamoDB: {e}")
 
-def save_tweets_to_db(tweets, user, db_path="tweets.db"):
-    """Guarda los tweets en la base de datos con batch insert."""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+def send_cloudwatch_metrics(metrics):
+    """Envía métricas a CloudWatch para monitoreo."""
+    try:
+        cw = boto3.client('cloudwatch')
+        metric_data = []
+        for name, value in metrics.items():
+            metric_data.append({
+                'MetricName': name,
+                'Value': value,
+                'Unit': 'Count'
+            })
+        
+        if metric_data:
+            cw.put_metric_data(
+                Namespace=os.getenv("CW_NAMESPACE", "TwitterScraper"),
+                MetricData=metric_data
+            )
+    except Exception as e:
+        logger.error(f"Error enviando métricas a CloudWatch: {e}")
+
+def save_tweets_to_db(tweets, user):
+    """Guarda los tweets en DynamoDB con batch insert y TTL de 72hs."""
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(DYNAMODB_TABLE)
     
     # Filtrar tweets válidos
     valid_tweets = []
-    params = []
     for t in tweets:
         if not t.get("url") or not t.get("date") or not t.get("content"):
             logger.warning(f"Tweet inválido: {t}")
             continue
-        
         valid_tweets.append(t)
-        params.append((
-            t["url"].split("/")[-1],  # id
-            user,
-            t["date"],
-            t["url"],
-            t["content"],
-            datetime.now().isoformat(),
-            int(t.get("is_retweet", False)),
-            int(t.get("has_image", False))
-        ))
     
-    # Nada que insertar
-    if not params:
-        conn.close()
+    if not valid_tweets:
         return []
     
     # Obtener IDs existentes para devolver solo tweets nuevos
     ids_to_check = [t["url"].split("/")[-1] for t in valid_tweets]
-    placeholders = ','.join(['?'] * len(ids_to_check))
-    cursor.execute(f"SELECT id FROM tweets WHERE id IN ({placeholders})", ids_to_check)
-    existing_ids = {row[0] for row in cursor.fetchall()}
+    existing_ids = set()
+    read_errors = 0
     
-    # Insertar todos en una sola operación
-    cursor.executemany("""
-        INSERT OR IGNORE INTO tweets (id, user, date, url, content, scraped_at, is_retweet, has_image)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, params)
-    
-    # Determinar cuáles fueron realmente insertados
-    nuevos = [t for t in valid_tweets if t["url"].split("/")[-1] not in existing_ids]
-    
-    conn.commit()
-    conn.close()
+    # Batch get para verificar existencia (limitado a 100 items por request, aquí asumimos <100)
+    if ids_to_check:
+        try:
+            # DynamoDB batch_get_item requiere claves únicas
+            unique_ids = list(set(ids_to_check))
+            # Procesar en chunks de 100 si fuera necesario, pero MAX_TWEETS es bajo
+            response = dynamodb.batch_get_item(
+                RequestItems={
+                    DYNAMODB_TABLE: {
+                        'Keys': [{'Id': i} for i in unique_ids],
+                        'ProjectionExpression': 'Id'
+                    }
+                }
+            )
+            existing_ids = {item['Id'] for item in response['Responses'].get(DYNAMODB_TABLE, [])}
+        except Exception as e:
+            logger.error(f"Error verificando existencia de tweets: {e}")
+            read_errors = 1
+
+    nuevos = []
+    write_errors = 0
+    try:
+        with table.batch_writer() as batch:
+            for t in valid_tweets:
+                t_id = t["url"].split("/")[-1]
+                if t_id not in existing_ids:
+                    # TTL: 72 horas desde ahora
+                    expire_at = int((datetime.now() + timedelta(hours=72)).timestamp())
+                    
+                    item = {
+                        'Id': t_id,
+                        'User': user,
+                        'Date': t['date'],
+                        'Url': t['url'],
+                        'Content': t['content'],
+                        'ScrapedAt': datetime.now().isoformat(),
+                        'IsRetweet': int(t.get("is_retweet", False)),
+                        'HasImage': int(t.get("has_image", False)),
+                        'ExpireAt': expire_at
+                    }
+                    batch.put_item(Item=item)
+                    nuevos.append(t)
+                    existing_ids.add(t_id) # Evitar duplicados en el mismo batch
+    except Exception as e:
+        logger.error(f"Error guardando tweets en DynamoDB: {e}")
+        write_errors = 1
+        
+    # Enviar métricas
+    try:
+        skipped_count = len(valid_tweets) - len(nuevos)
+        metrics = {
+            'TweetsScraped': len(valid_tweets),
+            'TweetsInserted': len(nuevos),
+            'TweetsSkipped': skipped_count, # "Lecturas al pedo" (ya existían)
+            'DynamoDBReadErrors': read_errors,
+            'DynamoDBWriteErrors': write_errors
+        }
+        send_cloudwatch_metrics(metrics)
+        logger.info(f"Métricas enviadas: {json.dumps(metrics)}")
+    except Exception as e:
+        logger.warning(f"No se pudieron calcular/enviar métricas: {e}")
+        
     return nuevos
 
 def login_and_save_cookies():
@@ -135,54 +215,77 @@ def move_mouse_randomly_over_tweet(page, tweet):
     except:
         pass
 
-def get_tweets_from_db(db_path="tweets.db"):
-    """Devuelve todos los tweets almacenados en la base de datos como lista de dicts."""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, user, date, url, content, scraped_at, is_retweet, has_image FROM tweets ORDER BY scraped_at DESC")
-    rows = cursor.fetchall()
-    conn.close()
-    tweets = []
-    for row in rows:
-        tweets.append({
-            "id": row[0],
-            "user": row[1],
-            "date": row[2],
-            "url": row[3],
-            "content": row[4],
-            "scraped_at": row[5],
-            "is_retweet": bool(row[6]),
-            "has_image": bool(row[7])
-        })
-    return tweets
+def get_tweets_from_db():
+    """Devuelve todos los tweets almacenados en DynamoDB."""
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(DYNAMODB_TABLE)
+    try:
+        # Scan es costoso, usar con cuidado
+        response = table.scan()
+        items = response.get('Items', [])
+        # Paginación si hay muchos
+        while 'LastEvaluatedKey' in response:
+            response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
+            items.extend(response.get('Items', []))
+            
+        # Ordenar en memoria por scraped_at DESC
+        items.sort(key=lambda x: x.get('ScrapedAt', ''), reverse=True)
+        
+        tweets = []
+        for item in items:
+            tweets.append({
+                "id": item['Id'],
+                "user": item.get('User'),
+                "date": item.get('Date'),
+                "url": item.get('Url'),
+                "content": item.get('Content'),
+                "scraped_at": item.get('ScrapedAt'),
+                "is_retweet": bool(item.get('IsRetweet')),
+                "has_image": bool(item.get('HasImage'))
+            })
+        return tweets
+    except Exception as e:
+        logger.error(f"Error obteniendo tweets de DynamoDB: {e}")
+        return []
 
-def clear_tweets_in_db(db_path="tweets.db"):
-    """Elimina todos los tweets de la base de datos."""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM tweets")
-    conn.commit()
-    conn.close()
+def clear_tweets_in_db():
+    """Elimina todos los tweets de la tabla (recreándola)."""
+    dynamodb = boto3.resource('dynamodb')
+    try:
+        table = dynamodb.Table(DYNAMODB_TABLE)
+        table.delete()
+        table.wait_until_not_exists()
+        init_db()
+    except Exception as e:
+        logger.error(f"Error limpiando DB: {e}")
 
-def get_latest_tweet_ids_from_db(username, limit=20, db_path="tweets.db"):
-    """Obtiene los IDs de los últimos tweets de un usuario en la BD."""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id FROM tweets WHERE user = ? ORDER BY scraped_at DESC LIMIT ?",
-        (username, limit)
-    )
-    ids = [row[0] for row in cursor.fetchall()]
-    conn.close()
-    return set(ids)
+def get_latest_tweet_ids_from_db(username, limit=20):
+    """Obtiene los IDs de los últimos tweets de un usuario en DynamoDB."""
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(DYNAMODB_TABLE)
+    try:
+        response = table.query(
+            IndexName='UserIndex',
+            KeyConditionExpression=Key('User').eq(username),
+            ScanIndexForward=False, # DESC order
+            Limit=limit,
+            ProjectionExpression='Id'
+        )
+        ids = [item['Id'] for item in response.get('Items', [])]
+        return set(ids)
+    except Exception as e:
+        # Si la tabla no existe o error
+        logger.warning(f"No se pudieron obtener tweets previos para {username}: {e}")
+        return set()
 
-async def async_scrape_multiple_users_with_stealth(user_configs, max_consecutive_known=5, db_path="tweets.db"):
+async def async_scrape_multiple_users_with_stealth(user_configs, cookies, max_consecutive_known=5):
     """
     Scrapea varios usuarios en una sola sesión de Playwright usando playwright-stealth (async), devolviendo los tweets nuevos de todos.
     user_configs: lista de dicts con username, max_tweets, max_idle_scrolls, modo_humano
+    cookies: lista de dicts con las cookies
     """
-    if not os.path.exists(COOKIES_FILE):
-        logger.error("⚠️ No hay cookies guardadas. Ejecutá primero login_and_save_cookies()")
+    if not cookies:
+        logger.error("⚠️ No se proporcionaron cookies.")
         return []
 
     todos_nuevos = []
@@ -200,8 +303,6 @@ async def async_scrape_multiple_users_with_stealth(user_configs, max_consecutive
             browser = await p.chromium.launch(headless=HEADLESS)
             context = await browser.new_context()
             # Cargar cookies
-            with open(COOKIES_FILE, "r") as f:
-                cookies = json.load(f)
             await context.add_cookies(cookies)
             page = await context.new_page()
             while user_queue:
@@ -215,7 +316,7 @@ async def async_scrape_multiple_users_with_stealth(user_configs, max_consecutive
                 if isinstance(modo_humano, str):
                     modo_humano = modo_humano.lower() in ("1", "true", "yes")
                 logger.info(f"Scrapeando @{username}... (max_tweets={max_tweets}, max_idle_scrolls={max_idle_scrolls}, modo_humano={modo_humano})")
-                latest_ids = get_latest_tweet_ids_from_db(username, limit=30, db_path=db_path)
+                latest_ids = get_latest_tweet_ids_from_db(username, limit=30)
                 retries = retry_counts.get(username, 0)
                 try:
                     await page.goto(f"https://x.com/{username}", timeout=120000)
@@ -304,7 +405,7 @@ async def async_scrape_multiple_users_with_stealth(user_configs, max_consecutive
                             else:
                                 await page.evaluate("window.scrollBy(0, window.innerHeight)")
                                 await asyncio.sleep(random.uniform(1.5, 3.0))
-                    nuevos = save_tweets_to_db(tweets, username, db_path=db_path)
+                    nuevos = save_tweets_to_db(tweets, username)
                     logger.info(f"{len(nuevos)} nuevos tweets para @{username}")
                     todos_nuevos.extend(nuevos)
                 except Exception as e:
