@@ -43,8 +43,7 @@ jobs:
         container-name: scraper
         image: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
 
-    - name: Register new Task Definition
-      id: register
-      uses: aws-actions/amazon-ecs-register-task-definition@v1
+    - name: Register ECS Task Definition
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
       with:
         task-definition: ${{ steps.taskdef.outputs.task-definition }}
