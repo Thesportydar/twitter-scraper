@@ -6,6 +6,7 @@ import random
 import boto3
 from boto3.dynamodb.conditions import Key
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import logging
 import asyncio
 from playwright.async_api import async_playwright
@@ -19,11 +20,10 @@ logger = logging.getLogger(__name__)
 MAX_TWEETS = int(os.getenv("MAX_TWEETS", 15))
 MAX_IDLE_SCROLLS = int(os.getenv("MAX_IDLE_SCROLLS", 2))
 MODO_HUMANO = os.getenv("MODO_HUMANO", "true").lower() in ("1", "true", "yes")
-MODO_HUMANO = os.getenv("MODO_HUMANO", "true").lower() in ("1", "true", "yes")
-# COOKIES_FILE removed
-HEADLESS = os.getenv("HEADLESS", "true").lower() in ("1", "true", "yes")
 HEADLESS = os.getenv("HEADLESS", "true").lower() in ("1", "true", "yes")
 DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", "Tweet")
+S3_BUCKET = os.getenv("S3_BUCKET")
+EVENT_BUS_NAME = os.getenv("EVENT_BUS_NAME", "default")
 
 def init_db():
     """Inicializa la tabla de DynamoDB si no existe."""
@@ -85,6 +85,53 @@ def send_cloudwatch_metrics(metrics):
             )
     except Exception as e:
         logger.error(f"Error enviando métricas a CloudWatch: {e}")
+
+def upload_to_s3(tweets):
+    """Sube todos los tweets de la ejecución a S3 particionados por fecha de scraping."""
+    if not tweets or not S3_BUCKET:
+        return
+
+    s3 = boto3.client('s3')
+    # Usar explícitamente hora Argentina
+    tz_arg = ZoneInfo("America/Argentina/Buenos_Aires")
+    now = datetime.now(tz_arg)
+    
+    try:
+        # Estructura: year=YYYY/month=MM/day=DD/tweets_HH-MM-SS.json
+        file_name = f"tweets_{now.strftime('%H-%M-%S')}.json"
+        key = f"data/year={now.year}/month={now.month:02d}/day={now.day:02d}/{file_name}"
+        
+        s3.put_object(
+            Bucket=S3_BUCKET,
+            Key=key,
+            Body=json.dumps(tweets, ensure_ascii=False),
+            ContentType='application/json'
+        )
+        logger.info(f"Subidos {len(tweets)} tweets a s3://{S3_BUCKET}/{key}")
+        
+        # Enviar evento a EventBridge
+        eb = boto3.client('events')
+        event_payload = {
+            "bucket": S3_BUCKET,
+            "s3Key": key,
+            "count": len(tweets),
+            "status": "ok"
+        }
+        
+        eb.put_events(
+            Entries=[
+                {
+                    'Source': 'twitter.scraper',
+                    'DetailType': 'TweetsUploaded',
+                    'Detail': json.dumps(event_payload),
+                    'EventBusName': EVENT_BUS_NAME
+                }
+            ]
+        )
+        logger.info(f"Evento enviado a EventBridge: {event_payload}")
+        
+    except Exception as e:
+        logger.error(f"Error subiendo a S3 o enviando evento: {e}")
 
 def save_tweets_to_db(tweets, user):
     """Guarda los tweets en DynamoDB con batch insert y TTL de 72hs."""
@@ -425,6 +472,11 @@ async def async_scrape_multiple_users_with_stealth(user_configs, cookies, max_co
                         logger.error(f"Fallo definitivo scrapeando @{username}")
                     # Espera antes de reintentar
                     await asyncio.sleep(5 + 5*retries)
+            
+            # Subir todos los tweets nuevos de esta sesión a S3
+            if todos_nuevos:
+                upload_to_s3(todos_nuevos)
+                
             return todos_nuevos
     except Exception as e:
         logger.error(f"Error general en async_scrape_multiple_users_with_stealth: {e}")

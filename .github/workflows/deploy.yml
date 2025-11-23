@@ -34,3 +34,17 @@ jobs:
         platforms: linux/amd64
         push: true
         tags: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
+
+    - name: Render new Task Definition JSON
+      id: taskdef
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: taskdef.json
+        container-name: scraper
+        image: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
+
+    - name: Register new Task Definition
+      id: register
+      uses: aws-actions/amazon-ecs-register-task-definition@v1
+      with:
+        task-definition: ${{ steps.taskdef.outputs.task-definition }}

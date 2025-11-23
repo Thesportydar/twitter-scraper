@@ -1,0 +1,64 @@
+{
+    "family": "twitter-scraper-task",
+    "taskRoleArn": "arn:aws:iam::127197050421:role/TwitterScraper-Fargate-Role",
+    "executionRoleArn": "arn:aws:iam::127197050421:role/ecsTaskExecutionRole",
+    "networkMode": "awsvpc",
+    "cpu": "1024",
+    "memory": "3072",
+    "requiresCompatibilities": [
+        "FARGATE"
+    ],
+    "containerDefinitions": [
+        {
+            "name": "scraper",
+            "image": "DUMMY",
+            "essential": true,
+            "environment": [
+                {
+                    "name": "SSM_COOKIES_PARAM",
+                    "value": "/twitter-scraper/cookies"
+                },
+                {
+                    "name": "SSM_CONFIG_PARAM",
+                    "value": "/twitter-scraper/user-configs"
+                },
+                {
+                    "name": "DYNAMODB_TABLE",
+                    "value": "Tweet"
+                },
+                {
+                    "name": "CW_NAMESPACE",
+                    "value": "TwitterScraper"
+                },
+                {
+                    "name": "MAX_TWEETS",
+                    "value": "15"
+                },
+                {
+                    "name": "MAX_IDLE_SCROLLS",
+                    "value": "2"
+                },
+                {
+                    "name": "MODO_HUMANO",
+                    "value": "true"
+                },
+                {
+                    "name": "S3_BUCKET",
+                    "value": "inaqui-twitter-scraper"
+                },
+                {
+                    "name": "EVENT_BUS_NAME",
+                    "value": "default"
+                }
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/",
+                    "awslogs-region": "us-east-1",
+                    "awslogs-stream-prefix": "ecs"
+                }
+            }
+        }
+    ]
+}
