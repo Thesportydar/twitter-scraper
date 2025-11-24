@@ -1,0 +1,108 @@
+---
+import Layout from "../layouts/BlogPost.astro";
+import AboutHeroImage from "../assets/fintwit.webp";
+import { Image } from "astro:assets";
+---
+
+<Layout
+  title="Acerca del proyecto"
+  description="Información sobre el sistema, su funcionamiento y el descargo de responsabilidad."
+  pubDate={new Date("July 04 2025")}
+  heroImage={AboutHeroImage}
+>
+
+  <Image
+	src={AboutHeroImage}
+	alt="Fintwit Argy Bot"
+	width={320}
+	height={320}
+	class={"about-hero-image"}
+	/>
+
+  <p class="mb-4">
+    <strong>Fintwit Argy Bot</strong> es un sistema automatizado que genera reportes
+    sobre la conversación financiera argentina en X (ex‑Twitter). A través del análisis
+    de publicaciones de usuarios influyentes en el ámbito económico, político y bursátil,
+    el sistema utiliza inteligencia artificial para producir informes diarios en
+    tres horarios clave:
+  </p>
+
+  <ul class="list-disc list-inside mb-6">
+    <li>
+      <strong>10:00 (Pre-Mercado):</strong> Clima previo a la apertura de los mercados.
+    </li>
+    <li>
+      <strong>13:00 (Media Rueda):</strong> Tendencias y dinámicas durante la jornada.
+    </li>
+    <li>
+      <strong>22:00 (Post-Mercado):</strong> Análisis de cierre y expectativas para
+      el día siguiente.
+    </li>
+    <li>
+      <strong>Reportes Especiales:</strong> Publicados durante feriados o fines de
+      semana si hay actividad relevante en la red.
+    </li>
+  </ul>
+
+  <h2 class="text-2xl font-semibold mt-8 mb-4">Sobre el desarrollo</h2>
+
+  <p class="mb-4">
+    Este proyecto fue desarrollado de forma independiente como experimento en
+    inteligencia artificial aplicada al seguimiento de mercados. No está
+    vinculado a ninguna entidad financiera, broker o medio de comunicación.
+  </p>
+
+  <h2 class="text-2xl font-semibold mt-8 mb-4">Licencia y uso del contenido</h2>
+
+  <p class="mb-4">
+    Todo el contenido generado por <strong>Fintwit Argy Bot</strong> se encuentra dedicado al dominio público bajo la licencia <a href="https://creativecommons.org/publicdomain/zero/1.0/deed.es" target="_blank" rel="noopener">CC0 1.0</a>.
+	Esto significa que podés copiar, modificar, distribuir y utilizar el contenido para cualquier propósito, incluso con fines comerciales, sin necesidad de solicitar permiso ni atribuir la autoría. Se ofrece tal cual, sin garantías de ningún tipo.
+	Tené en cuenta que, según la legislación argentina, los derechos morales (como el reconocimiento de autoría) no pueden ser renunciados, pero no se exigirá atribución alguna ni se impondrá restricción legal sobre el uso del contenido.
+  </p>
+
+  <h2 class="text-2xl font-semibold mt-8 mb-4">Descargo de responsabilidad</h2>
+
+  <p class="mb-4">
+    Los reportes generados por Fintwit Argy Bot son creados automáticamente
+    mediante inteligencia artificial. Si bien se procura reflejar de manera
+    precisa la conversación actual del mercado informal, <strong
+      >no constituyen asesoramiento financiero ni deben tomarse como
+      recomendación de inversión</strong
+    >.
+  </p>
+
+  <ul class="list-disc list-inside mb-4">
+    <li>
+      Invertir en activos financieros implica riesgos, incluyendo la pérdida
+      total o parcial del capital.
+    </li>
+    <li>
+      El sistema no reemplaza el análisis profesional ni el juicio personal.
+    </li>
+    <li>
+      Se recomienda consultar con asesores financieros calificados antes de
+      tomar decisiones de inversión.
+    </li>
+    <li>
+      Las recomendaciones, sugerencias o interpretaciones que pudiera realizar
+      la inteligencia artificial no deben considerarse instrucciones, consejos
+      ni sugerencias de inversión bajo ninguna circunstancia.
+    </li>
+  </ul>
+
+  <p class="mb-6">
+    Este contenido se ofrece con <strong
+      >fines informativos y experimentales</strong
+    >. El autor no asume responsabilidad por decisiones tomadas en base a interpretaciones
+    automáticas o sugerencias generadas por el sistema. La información puede contener errores,
+    estar incompleta o desactualizada debido a las limitaciones propias de los
+    sistemas automáticos de inteligencia artificial.
+  </p>
+
+  <h2 class="text-2xl font-semibold mt-8 mb-4">Jurisdicción</h2>
+  <p class="mb-4">
+    Este sitio y su contenido se rigen por las leyes de la República Argentina.
+    Cualquier controversia derivada de su uso será sometida a la jurisdicción de
+    los tribunales competentes de la Ciudad Autónoma de Buenos Aires.
+  </p>
+</Layout>

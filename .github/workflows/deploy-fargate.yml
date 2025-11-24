@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'scraper/**'
+      - '.github/workflows/deploy-fargate.yml'
 
 permissions:
   id-token: write
@@ -30,7 +33,7 @@ jobs:
     - name: Build, tag, and push image to Amazon ECR
       uses: docker/build-push-action@v5
       with:
-        context: .
+        context: scraper
         platforms: linux/amd64
         push: true
         tags: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
@@ -39,7 +42,7 @@ jobs:
       id: taskdef
       uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
-        task-definition: taskdef.json
+        task-definition: scraper/taskdef.json
         container-name: scraper
         image: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
 

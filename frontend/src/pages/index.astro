@@ -1,0 +1,59 @@
+---
+import BaseHead from "../components/BaseHead.astro";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+import { SITE_TITLE, SITE_DESCRIPTION } from "../consts";
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <BaseHead title={SITE_TITLE} description={SITE_DESCRIPTION} />
+  </head>
+  <body>
+    <Header />
+    <main>
+      <h1>Fintwit Argy Bot</h1>
+      <p>
+        <strong>Fintwit Argy Bot</strong> es una herramienta automatizada que monitorea
+        y analiza la conversación financiera argentina en X (ex Twitter), generando
+        reportes breves y estructurados que sintetizan el pulso del mercado en tiempo
+        real.
+      </p>
+      <p>
+        Cada reporte incluye un resumen del clima económico y político, tweets
+        destacados de actores relevantes del ecosistema financiero, y
+        apreciaciones de un analista virtual entrenado para interpretar el
+        contexto.
+      </p>
+      <p>
+        Los reportes se generan en tres momentos clave de la jornada bursátil:
+      </p>
+      <ul>
+        <li>
+          <strong>10:00 (Pre-Mercado):</strong> Expectativas y señales antes de la
+          apertura.
+        </li>
+        <li>
+          <strong>13:00 (Media Rueda):</strong> Tendencias, sorpresas y drivers durante
+          la jornada.
+        </li>
+        <li>
+          <strong>22:00 (Post-Mercado):</strong> Balance completo, ganadores y pistas
+          para el día siguiente.
+        </li>
+        <li>
+          <strong>Reportes Especiales:</strong> Publicados durante feriados o fines
+          de semana si hay actividad relevante en la red.
+        </li>
+      </ul>
+      <p>
+        ⚠️ Los reportes son generados por un sistema de inteligencia artificial
+        y tienen fines informativos. No constituyen asesoramiento financiero ni
+        recomendación de inversión.
+      </p>
+    </main>
+    <Footer />
+  </body>
+</html>
+

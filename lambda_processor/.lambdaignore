@@ -1,0 +1,29 @@
+# Dependencias locales
+node_modules/
+package.json
+package-lock.json
+
+# Config y envs
+.env
+.env.*
+*.local
+
+# Archivos de desarrollo
+*.md
+README*
+test/
+tests/
+__tests__/
+coverage/
+
+# Archivos del SO
+.DS_Store
+*.log
+
+# Carpetas generadas
+dist/
+build/
+tmp/
+
+# prettier
+.prettierrc

@@ -1,0 +1,40 @@
+name: Deploy Lambda Processor
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'lambda_processor/**'
+      - '.github/workflows/deploy-lambda.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: aws
+    defaults:
+      run:
+        working-directory: ./lambda_processor
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: "${{ secrets.AWS_ROLE_ARN }}"
+          aws-region: "${{ secrets.AWS_REGION }}"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Zip Lambda
+        run: zip -r lambda.zip .
+
+      - name: Update Lambda Code
+        run: aws lambda update-function-code --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} --zip-file fileb://lambda.zip

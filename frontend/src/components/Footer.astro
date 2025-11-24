@@ -1,0 +1,42 @@
+---
+const today = new Date();
+import GithubMark from '@/assets/github-mark.svg';
+import LinkedinMark from '@/assets/linkedin-mark.svg';
+---
+
+<footer>
+  &copy; {today.getFullYear()} Iñaqui Paladino. 
+  Contenido bajo licencia <a href="https://creativecommons.org/publicdomain/zero/1.0/deed.es" target="_blank" rel="noopener">CC0 1.0</a>.
+  <br>Este sitio no brinda asesoramiento financiero.
+  <div class="social-links">
+    <a href="https://www.linkedin.com/in/ipaladino/" target="_blank">
+      <span class="sr-only">Follow Astro on Twitter</span>
+      <LinkedinMark width="42" height="42" />
+    </a>
+    <a href="https://github.com/Thesportydar" target="_blank">
+      <span class="sr-only">Go to Astro's GitHub repo</span>
+      <GithubMark width="42" height="42" />
+    </a>
+  </div>
+</footer>
+<style>
+  footer {
+    padding: 2em 1em 2em 1em;
+    background: linear-gradient(var(--gray-gradient)) no-repeat;
+    color: rgb(var(--gray));
+    text-align: center;
+  }
+  .social-links {
+    display: flex;
+    justify-content: center;
+    gap: 1em;
+    margin-top: 1em;
+  }
+  .social-links a {
+    text-decoration: none;
+    color: rgb(var(--gray));
+  }
+  .social-links a:hover {
+    color: rgb(var(--gray-dark));
+  }
+</style>

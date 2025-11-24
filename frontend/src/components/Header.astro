@@ -1,0 +1,97 @@
+---
+import HeaderLink from "./HeaderLink.astro";
+import { SITE_TITLE } from "../consts";
+import GithubMark from "@/assets/github-mark.svg";
+import LinkedinMark from "@/assets/linkedin-mark.svg";
+import FintwitLogo from "../../public/fintwit-logo.svg";
+---
+
+<header>
+  <nav>
+    <a href="/" class="logo-title">
+      <FintwitLogo width="36" height="36" />
+      <h2>{SITE_TITLE}</h2>
+    </a>
+    <div class="internal-links">
+      <HeaderLink href="/">Inicio</HeaderLink>
+      <HeaderLink href="/blog">Reportes</HeaderLink>
+      <HeaderLink href="/about">Acerca</HeaderLink>
+    </div>
+    <div class="social-links">
+      <a href="https://www.linkedin.com/in/ipaladino/" target="_blank">
+        <span class="sr-only">Follow Astro on Twitter</span>
+        <LinkedinMark width="36" height="36" />
+      </a>
+      <a href="https://github.com/Thesportydar" target="_blank">
+        <span class="sr-only">Go to Astro's GitHub repo</span>
+        <GithubMark width="36" height="36" />
+      </a>
+    </div>
+  </nav>
+</header>
+<style>
+  header {
+    margin: 0;
+    padding: 0 1em;
+    background: white;
+    box-shadow: 0 2px 8px rgba(var(--black), 5%);
+  }
+  h2 {
+    margin: 0;
+    font-size: 1em;
+  }
+
+  h2 a,
+  h2 a.active {
+    text-decoration: none;
+  }
+  nav {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 1rem;
+  }
+  nav a {
+    padding: 1em 0.5em;
+    color: var(--black);
+    border-bottom: 4px solid transparent;
+    text-decoration: none;
+  }
+  nav a.active {
+    text-decoration: none;
+    border-bottom-color: var(--accent);
+  }
+  .social-links,
+  .social-links a,
+  .logo-title,
+  .internal-links {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+  }
+  .internal-links {
+    gap: 0.5em;
+    justify-self: center;
+  }
+  .social-links {
+    justify-self: end;
+  }
+  .logo-title {
+    text-decoration: none;
+    color: var(--black);
+    column-gap: 0.5em;
+  }
+  @media (max-width: 720px) {
+    nav {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .logo-title h2 {
+      display: none;
+    }
+    .social-links {
+      display: none;
+    }
+  }
+</style>

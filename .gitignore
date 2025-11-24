@@ -1,0 +1,34 @@
+# General
+.DS_Store
+.env
+.env.*
+
+# Python (Scraper)
+__pycache__/
+*.py[cod]
+*.class
+venv/
+env/
+.venv/
+*.log
+scraper/tweets.db
+scraper/twitter_cookies.json
+
+# Node.js (Lambda & Frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Astro (Frontend)
+frontend/dist/
+frontend/.astro/
+
+# Lambda Processor
+lambda_processor/lambda.zip
+
+# IDEs
+.vscode/
+.idea/
+*.swp
