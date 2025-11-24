@@ -360,7 +360,7 @@ async function uploadToGitHub(filename, content) {
     const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
     const OWNER = process.env.GITHUB_OWNER;
     const REPO = process.env.GITHUB_REPO;
-    const PATH = 'src/content/blog';
+    const PATH = 'frontend/src/content/blog';
 
     const url = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${PATH}/${filename}`;
 
