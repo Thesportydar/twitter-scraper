@@ -1,4 +1,7 @@
 import OpenAI from "openai";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+
+const s3Client = new S3Client();
 
 /* const feriados = fetch(`https://api.argentinadatos.com/v1/feriados/${(new Date()).getFullYear()}`)
   .then(res => res.json())
@@ -385,10 +388,30 @@ async function uploadToGitHub(filename, content) {
     return await response.json();
 }
 
+
+async function fetchFromS3(bucket, key) {
+    if (!bucket || !key) {
+        throw new Error("Missing bucket or s3Key");
+    }
+    const getCommand = new GetObjectCommand({
+        Bucket: bucket,
+        Key: key
+    });
+    const s3Response = await s3Client.send(getCommand);
+    const s3Body = await s3Response.Body.transformToString();
+    return JSON.parse(s3Body);
+}
+
+
 export const handler = async (event) => {
-    const items = event.body;
+    console.log("Event received:", JSON.stringify(event, null, 2));
 
     try {
+        // 0. Obtener datos de S3
+        const { bucket, s3Key } = event.detail;
+        const items = await fetchFromS3(bucket, s3Key);
+        console.log(`Loaded ${items.length} items from s3://${bucket}/${s3Key}`);
+
         // 1. Generar Prompt
         const { prompt, tipo } = generateAnalysisPrompt(items);
 
