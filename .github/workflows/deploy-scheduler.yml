@@ -1,12 +1,12 @@
-name: Deploy Lambda Processor
+name: Deploy Lambda Scheduler
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'lambdas/processor/**'
-      - '.github/workflows/deploy-lambda.yml'
+      - 'lambdas/scheduler/**'
+      - '.github/workflows/deploy-scheduler.yml'
 
 permissions:
   id-token: write
@@ -18,7 +18,7 @@ jobs:
     environment: aws
     defaults:
       run:
-        working-directory: ./lambdas/processor
+        working-directory: ./lambdas/scheduler
 
     steps:
       - name: Checkout
@@ -34,4 +34,4 @@ jobs:
         run: zip -r lambda.zip index.mjs
 
       - name: Update Lambda Code
-        run: aws lambda update-function-code --function-name ${{ secrets.LAMBDA_FUNCTION_NAME }} --zip-file fileb://lambda.zip
+        run: aws lambda update-function-code --function-name ${{ secrets.SCHEDULER_FUNCTION_NAME }} --zip-file fileb://lambda.zip
