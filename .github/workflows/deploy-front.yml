@@ -40,4 +40,4 @@ jobs:
         run: aws s3 sync --delete --size-only ./dist/ s3://${{ secrets.AWS_BUCKET_ID }}/site
       
       - name: Create CloudFront invalidation
-        run: aws cloudfront create-invalidation --distribution-id ${{ secrets.AWS_DISTRIBUTION_ID }} --paths "/*.html" "/"
+        run: aws cloudfront create-invalidation --distribution-id ${{ secrets.AWS_DISTRIBUTION_ID }} --paths "/*"
