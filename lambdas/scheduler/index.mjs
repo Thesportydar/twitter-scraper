@@ -98,7 +98,12 @@ export const handler = async (event) => {
             const command = new RunTaskCommand({
                 cluster: cluster,
                 taskDefinition: taskDefinition,
-                launchType: "FARGATE",
+                capacityProviderStrategy: [
+                  {
+                    capacityProvider: "FARGATE_SPOT",
+                    weight: 1
+                  }
+                ],
                 networkConfiguration: {
                     awsvpcConfiguration: {
                         subnets: subnets,
