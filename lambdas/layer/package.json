@@ -1,5 +1,5 @@
 {
-  "name": "lambda_processor",
+  "name": "layer",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -10,7 +10,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "openai": "^6.9.1",
-    "prettier": "^3.6.2"
+    "openai": "^6.16.0"
   }
 }

@@ -4,9 +4,19 @@ on:
   push:
     branches:
       - main
+      - stage
     paths:
       - 'scraper/**'
       - '.github/workflows/deploy-fargate.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target Environment'
+        required: false
+        type: choice
+        options:
+          - stage
+          - prod
 
 permissions:
   id-token: write
@@ -15,7 +25,13 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: aws
+    environment: >-
+      ${{ 
+        inputs.environment || 
+        (github.ref == 'refs/heads/main' && 'prod') || 
+        (github.ref == 'refs/heads/stage' && 'stage') || 
+        'stage' 
+      }}
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -24,7 +40,7 @@ jobs:
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: "${{ secrets.AWS_ROLE_ARN }}"
-        aws-region: "${{ secrets.AWS_REGION }}"
+        aws-region: "${{ vars.AWS_REGION }}"
 
     - name: Login to Amazon ECR
       id: login-ecr
@@ -36,7 +52,25 @@ jobs:
         context: scraper
         platforms: linux/amd64
         push: true
-        tags: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
+        tags: ${{ vars.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:latest
+
+    - name: Get AWS Account ID
+      id: get-account
+      run: echo "AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)" >> $GITHUB_ENV
+
+    - name: Substitute Environment Variables in Task Definition
+      env:
+        AWS_ACCOUNT_ID: ${{ env.AWS_ACCOUNT_ID }}
+        AWS_REGION: ${{ vars.AWS_REGION }}
+        S3_BUCKET_NAME: ${{ vars.S3_BUCKET_NAME }}
+        DYNAMODB_TABLE: ${{ vars.DYNAMODB_TABLE }}
+        SSM_COOKIES_PARAM: ${{ vars.SSM_COOKIES_PARAM }}
+        SSM_CONFIG_PARAM: ${{ vars.SSM_CONFIG_PARAM }}
+        TASK_ROLE_NAME: ${{ vars.TASK_ROLE_NAME }}
+        EXECUTION_ROLE_NAME: ${{ vars.EXECUTION_ROLE_NAME }}
+      run: |
+        envsubst < scraper/taskdef.json > scraper/taskdef-rendered.json
+        mv scraper/taskdef-rendered.json scraper/taskdef.json
 
     - name: Render new Task Definition JSON
       id: taskdef
@@ -44,7 +78,7 @@ jobs:
       with:
         task-definition: scraper/taskdef.json
         container-name: scraper
-        image: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:latest
+        image: ${{ vars.ECR_REGISTRY }}/${{ vars.ECR_REPOSITORY }}:latest
 
     - name: Register ECS Task Definition
       uses: aws-actions/amazon-ecs-deploy-task-definition@v1

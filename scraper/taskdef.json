@@ -1,7 +1,7 @@
 {
     "family": "twitter-scraper-task",
-    "taskRoleArn": "arn:aws:iam::127197050421:role/TwitterScraper-Fargate-Role",
-    "executionRoleArn": "arn:aws:iam::127197050421:role/ecsTaskExecutionRole",
+    "taskRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${TASK_ROLE_NAME}",
+    "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/${EXECUTION_ROLE_NAME}",
     "networkMode": "awsvpc",
     "cpu": "1024",
     "memory": "3072",
@@ -16,15 +16,15 @@
             "environment": [
                 {
                     "name": "SSM_COOKIES_PARAM",
-                    "value": "/twitter-scraper/cookies"
+                    "value": "${SSM_COOKIES_PARAM}"
                 },
                 {
                     "name": "SSM_CONFIG_PARAM",
-                    "value": "/twitter-scraper/user-configs"
+                    "value": "${SSM_CONFIG_PARAM}"
                 },
                 {
                     "name": "DYNAMODB_TABLE",
-                    "value": "Tweet"
+                    "value": "${DYNAMODB_TABLE}"
                 },
                 {
                     "name": "CW_NAMESPACE",
@@ -44,7 +44,7 @@
                 },
                 {
                     "name": "S3_BUCKET",
-                    "value": "inaqui-twitter-scraper"
+                    "value": "${S3_BUCKET_NAME}"
                 },
                 {
                     "name": "EVENT_BUS_NAME",
@@ -54,8 +54,8 @@
             "logConfiguration": {
                 "logDriver": "awslogs",
                 "options": {
-                    "awslogs-group": "/ecs/",
-                    "awslogs-region": "us-east-1",
+                    "awslogs-group": "/ecs/twitter-scraper",
+                    "awslogs-region": "${AWS_REGION}",
                     "awslogs-stream-prefix": "ecs"
                 }
             }

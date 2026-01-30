@@ -3,7 +3,7 @@ import json
 import asyncio
 import boto3
 import logging
-from scraper import async_scrape_multiple_users_with_stealth, init_db
+from scraper import async_scrape_multiple_users_with_stealth
 
 # Configuración de Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -48,9 +48,6 @@ def setup_environment():
 
 async def main():
     logger.info("Iniciando ejecución del scraper...")
-    
-    # Inicializar DB
-    init_db()
     
     try:
         # Configurar entorno (SSM)

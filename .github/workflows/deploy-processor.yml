@@ -1,4 +1,4 @@
-name: Deploy Website to AWS
+name: Deploy Lambda Processor
 
 on:
   push:
@@ -6,8 +6,8 @@ on:
       - main
       - stage
     paths:
-      - 'frontend/**'
-      - '.github/workflows/deploy-front.yml'
+      - 'lambdas/processor/**'
+      - '.github/workflows/deploy-processor.yml'
   workflow_dispatch:
     inputs:
       environment:
@@ -34,26 +34,20 @@ jobs:
       }}
     defaults:
       run:
-        working-directory: ./frontend
+        working-directory: ./lambdas/processor
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: "${{ secrets.AWS_ROLE_ARN }}"
           aws-region: "${{ vars.AWS_REGION }}"
-      
-      - name: Install modules
-        run: npm ci
-      
-      - name: Build application
-        run: npm run build
-      
-      - name: Deploy to S3
-        run: aws s3 sync --delete --size-only ./dist/ s3://${{ vars.S3_BUCKET_NAME }}/site
-      
-      - name: Create CloudFront invalidation
-        run: aws cloudfront create-invalidation --distribution-id ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"
+
+      - name: Zip Lambda
+        run: zip -r lambda.zip index.mjs
+
+      - name: Update Lambda Code
+        run: aws lambda update-function-code --function-name ${{ vars.PROCESSOR_FUNCTION_NAME }} --zip-file fileb://lambda.zip

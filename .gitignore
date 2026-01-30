@@ -27,10 +27,15 @@ frontend/dist/
 frontend/.astro/
 
 # Lambda Processor
-lambdas/processor/lambda.zip
-lambdas/scheduler/lambda.zip
+lambdas/**/*.zip
 
 # IDEs
 .vscode/
 .idea/
 *.swp
+
+# Terraform
+terraform/terraform.tfvars
+terraform/.terraform
+terraform/.terraform.lock.hcl
+terraform/backend.conf

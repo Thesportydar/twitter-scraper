@@ -25,47 +25,6 @@ DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", "Tweet")
 S3_BUCKET = os.getenv("S3_BUCKET")
 EVENT_BUS_NAME = os.getenv("EVENT_BUS_NAME", "default")
 
-def init_db():
-    """Inicializa la tabla de DynamoDB si no existe."""
-    dynamodb = boto3.resource('dynamodb')
-    try:
-        table = dynamodb.create_table(
-            TableName=DYNAMODB_TABLE,
-            KeySchema=[{'AttributeName': 'Id', 'KeyType': 'HASH'}],
-            AttributeDefinitions=[
-                {'AttributeName': 'Id', 'AttributeType': 'S'},
-                {'AttributeName': 'User', 'AttributeType': 'S'},
-                {'AttributeName': 'ScrapedAt', 'AttributeType': 'S'}
-            ],
-            GlobalSecondaryIndexes=[{
-                'IndexName': 'UserIndex',
-                'KeySchema': [
-                    {'AttributeName': 'User', 'KeyType': 'HASH'},
-                    {'AttributeName': 'ScrapedAt', 'KeyType': 'RANGE'}
-                ],
-                'Projection': {'ProjectionType': 'ALL'}
-            }],
-            BillingMode='PAY_PER_REQUEST'
-        )
-        print(f"Creando tabla {DYNAMODB_TABLE}...")
-        table.wait_until_exists()
-        
-        # Habilitar TTL
-        client = boto3.client('dynamodb')
-        client.update_time_to_live(
-            TableName=DYNAMODB_TABLE,
-            TimeToLiveSpecification={
-                'Enabled': True,
-                'AttributeName': 'ExpireAt'
-            }
-        )
-        print(f"Tabla {DYNAMODB_TABLE} creada con TTL.")
-    except Exception as e:
-        if "ResourceInUseException" in str(e):
-            pass
-        else:
-            logger.error(f"Error inicializando DynamoDB: {e}")
-
 def send_cloudwatch_metrics(metrics):
     """Envía métricas a CloudWatch para monitoreo."""
     try:
@@ -295,17 +254,6 @@ def get_tweets_from_db():
         logger.error(f"Error obteniendo tweets de DynamoDB: {e}")
         return []
 
-def clear_tweets_in_db():
-    """Elimina todos los tweets de la tabla (recreándola)."""
-    dynamodb = boto3.resource('dynamodb')
-    try:
-        table = dynamodb.Table(DYNAMODB_TABLE)
-        table.delete()
-        table.wait_until_not_exists()
-        init_db()
-    except Exception as e:
-        logger.error(f"Error limpiando DB: {e}")
-
 def get_latest_tweet_ids_from_db(username, limit=20):
     """Obtiene los IDs de los últimos tweets de un usuario en DynamoDB."""
     dynamodb = boto3.resource('dynamodb')
@@ -494,21 +442,6 @@ async def async_scrape_multiple_users_with_stealth(user_configs, cookies, max_co
 
 # Ejemplo de uso
 if __name__ == "__main__":
-    # PASO 1: Ejecutar solo una vez para guardar cookies
+    # Ejecutar solo una vez para guardar cookies
     login_and_save_cookies()
     exit(0)
-    
-    # PASO 2: Scrapear usando cookies guardadas
-    username = "dosinaga2"
-    tweets = scrape_twitter_with_cookies(username, max_tweets=15, max_idle_scrolls=2)
-    
-    print(f"\nÚltimos tweets de @{username}:")
-    for i, tweet in enumerate(tweets, 1):
-        print(f"\n--- TWEET {i} [{tweet['date']}] ---")
-        print(tweet["content"])
-        print(f"URL: {tweet['url']}")
-
-    # Guardar en la base de datos
-    init_db()
-    nuevos_tweets = save_tweets_to_db(tweets, username)
-    print(f"\n✅ {len(nuevos_tweets)} tweets nuevos guardados en la base de datos.")

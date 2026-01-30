@@ -1,7 +1,9 @@
 import OpenAI from "openai";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { SSMClient, GetParametersCommand } from "@aws-sdk/client-ssm";
 
 const s3Client = new S3Client();
+const ssmClient = new SSMClient();
 
 /* const feriados = fetch(`https://api.argentinadatos.com/v1/feriados/${(new Date()).getFullYear()}`)
   .then(res => res.json())
@@ -359,8 +361,7 @@ heroImage: '${heroMap[tipo] || '../../assets/hero-feriado.webp'}'
 };
 
 
-async function uploadToGitHub(filename, content) {
-    const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+async function uploadToGitHub(filename, content, GITHUB_TOKEN) {
     const OWNER = process.env.GITHUB_OWNER;
     const REPO = process.env.GITHUB_REPO;
     const PATH = 'frontend/src/content/blog';
@@ -406,20 +407,42 @@ async function fetchFromS3(bucket, key) {
 }
 
 
+async function getSecrets() {
+    const command = new GetParametersCommand({
+        Names: ['/twitter-scraper/GITHUB_TOKEN', '/twitter-scraper/OPENAI_API_KEY'],
+        WithDecryption: true
+    });
+    const { Parameters } = await ssmClient.send(command);
+    const secrets = {};
+    if (Parameters) {
+        Parameters.forEach(p => {
+            if (p.Name.endsWith('GITHUB_TOKEN')) secrets.GITHUB_TOKEN = p.Value;
+            if (p.Name.endsWith('OPENAI_API_KEY')) secrets.OPENAI_API_KEY = p.Value;
+        });
+    }
+    return secrets;
+}
+
 export const handler = async (event) => {
     console.log("Event received:", JSON.stringify(event, null, 2));
 
     try {
-        // 0. Obtener datos de S3
+        // 0. Obtener datos de S3 y Secretos
         const { bucket, s3Key } = event.detail;
-        const items = await fetchFromS3(bucket, s3Key);
+
+        const [secrets, items] = await Promise.all([
+            getSecrets(),
+            fetchFromS3(bucket, s3Key)
+        ]);
+
+        const { GITHUB_TOKEN, OPENAI_API_KEY } = secrets;
         console.log(`Loaded ${items.length} items from s3://${bucket}/${s3Key}`);
 
         // 1. Generar Prompt
         const { prompt, tipo } = generateAnalysisPrompt(items);
 
         // 2. Llamar a OpenAI
-        const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const client = new OpenAI({ apiKey: OPENAI_API_KEY });
         const res = await client.responses.create({
             model: "gpt-5-nano",
             input: prompt,
@@ -429,7 +452,7 @@ export const handler = async (event) => {
         const { filename, content } = formatBlogPost(res.output_text, tipo);
 
         // 4. Subir a GitHub
-        const ghResponse = await uploadToGitHub(filename, content);
+        const ghResponse = await uploadToGitHub(filename, content, GITHUB_TOKEN);
 
         return {
             statusCode: 200,
