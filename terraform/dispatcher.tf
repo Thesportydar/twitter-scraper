@@ -100,7 +100,7 @@ resource "aws_scheduler_schedule" "scheduler" {
     mode = "OFF"
   }
 
-  schedule_expression = "cron(0 10,13,20,22 * * ? *)"
+  schedule_expression = "cron(0 7,10,17,19 * * ? *)"
 
   target {
     arn      = aws_lambda_function.dispatcher.arn
