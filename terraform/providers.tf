@@ -1,6 +1,6 @@
 provider "aws" {
   region  = "us-east-1"
-  profile = "terraform-admin"
+  profile = "${var.environment}-terraform-admin"
 
   assume_role {
     role_arn = var.terraform_execution_role_arn
@@ -18,7 +18,7 @@ provider "aws" {
 provider "aws" {
   alias   = "route53"
   region  = "us-east-1"
-  profile = "terraform-admin"
+  profile = "${var.environment}-terraform-admin"
 
   assume_role {
     role_arn = var.route53_role_arn

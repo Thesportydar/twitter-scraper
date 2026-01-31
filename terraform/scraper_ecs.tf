@@ -2,6 +2,23 @@ resource "aws_ecs_cluster" "twitter-scraper" {
   name = "twitter-scraper"
 }
 
+resource "aws_cloudwatch_log_group" "ecs_log_group" {
+  name              = "/ecs/twitter-scraper"
+  retention_in_days = 30
+}
+
+resource "aws_ecs_cluster_capacity_providers" "twitter-scraper" {
+  cluster_name = aws_ecs_cluster.twitter-scraper.name
+
+  capacity_providers = ["FARGATE", "FARGATE_SPOT"]
+
+  default_capacity_provider_strategy {
+    base              = 1
+    weight            = 100
+    capacity_provider = "FARGATE_SPOT"
+  }
+}
+
 resource "aws_ecr_repository" "twitter-scraper" {
   name                 = var.ecr_repository_name
   image_tag_mutability = "MUTABLE"
