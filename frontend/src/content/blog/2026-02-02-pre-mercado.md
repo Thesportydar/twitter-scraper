@@ -1,7 +1,7 @@
 ---
 title: 'Lunes: Pre-Mercado'
 description: 'Análisis generado por IA antes de la apertura, con los tweets clave del ecosistema financiero argentino. (lunes, 2 de febrero de 2026)'
-pubDate: 'Feb 2, 2026 04:06'
+pubDate: 'Feb 2, 2026 10:06'
 heroImage: '../../assets/hero-pre.webp'
 ---
 

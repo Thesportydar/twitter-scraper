@@ -1,7 +1,7 @@
 ---
 title: 'Lunes: Post-Mercado'
 description: 'Cierre del día bursátil según la IA y Twitter. Ganadores, perdedores y señales para mañana. (lunes, 2 de febrero de 2026)'
-pubDate: 'Feb 2, 2026 16:06'
+pubDate: 'Feb 2, 2026 22:06'
 heroImage: '../../assets/hero-post.webp'
 ---
 

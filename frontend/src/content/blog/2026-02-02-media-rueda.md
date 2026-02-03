@@ -1,7 +1,7 @@
 ---
 title: 'Lunes: Media-Rueda'
 description: 'Lectura rápida de media jornada con IA: qué se comenta en Twitter financiero y cómo reacciona el mercado. (lunes, 2 de febrero de 2026)'
-pubDate: 'Feb 2, 2026 14:06'
+pubDate: 'Feb 2, 2026 13:06'
 heroImage: '../../assets/hero-intra.webp'
 ---
 

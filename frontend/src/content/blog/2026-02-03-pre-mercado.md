@@ -1,7 +1,7 @@
 ---
 title: 'Martes: Pre-Mercado'
 description: 'Análisis generado por IA antes de la apertura, con los tweets clave del ecosistema financiero argentino. (martes, 3 de febrero de 2026)'
-pubDate: 'Feb 3, 2026 04:06'
+pubDate: 'Feb 3, 2026 10:06'
 heroImage: '../../assets/hero-pre.webp'
 ---
 
