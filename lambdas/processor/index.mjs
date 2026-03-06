@@ -1,82 +1,10 @@
 import OpenAI from "openai";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { SSMClient, GetParametersCommand } from "@aws-sdk/client-ssm";
+import { getArgentinaTime, getFeriadoAR, getFeriadoUSA, TIMEZONE } from "./argentina-time.mjs";
 
 const s3Client = new S3Client();
 const ssmClient = new SSMClient();
-
-/* const feriados = fetch(`https://api.argentinadatos.com/v1/feriados/${(new Date()).getFullYear()}`)
-  .then(res => res.json())
-  .then(data => data.map(f => {
-    const date = new Date(f.fecha + 'T00:00:00-03:00');
-    return { mes: date.getMonth() + 1, dia: date.getDate(), motivo: f.nombre, tipo: "inamovible" };
-  })); */
-
-const feriados = [
-    { mes: 1, dia: 1, motivo: "Año nuevo", tipo: "inamovible" },
-    { mes: 2, dia: 16, motivo: "Carnaval", tipo: "inamovible" },
-    { mes: 2, dia: 17, motivo: "Carnaval", tipo: "inamovible" },
-    { mes: 3, dia: 23, motivo: "Día no laborable con fines turísticos", tipo: "puente" },
-    { mes: 3, dia: 24, motivo: "Día Nacional de la Memoria por la Verdad y la Justicia", tipo: "inamovible" },
-    { mes: 4, dia: 2, motivo: "Día del Veterano y de los Caídos en la Guerra de Malvinas", tipo: "inamovible" },
-    { mes: 4, dia: 3, motivo: "Viernes Santo", tipo: "inamovible" },
-    { mes: 5, dia: 1, motivo: "Día del Trabajador", tipo: "inamovible" },
-    { mes: 5, dia: 25, motivo: "Día de la Revolución de Mayo", tipo: "inamovible" },
-    { mes: 6, dia: 15, motivo: "Paso a la Inmortalidad del General Martín Güemes", tipo: "trasladable" },
-    { mes: 6, dia: 20, motivo: "Paso a la Inmortalidad del General Manuel Belgrano", tipo: "inamovible" },
-    { mes: 7, dia: 9, motivo: "Día de la Independencia", tipo: "inamovible" },
-    { mes: 7, dia: 10, motivo: "Puente turístico no laborable", tipo: "puente" },
-    { mes: 8, dia: 17, motivo: "Paso a la Inmortalidad del Gral. José de San Martín", tipo: "trasladable" },
-    { mes: 10, dia: 12, motivo: "Día de la Raza", tipo: "trasladable" },
-    { mes: 11, dia: 23, motivo: "Día de la Soberanía Nacional", tipo: "trasladable" },
-    { mes: 12, dia: 7, motivo: "Puente turístico no laborable", tipo: "puente" },
-    { mes: 12, dia: 8, motivo: "Día de la Inmaculada Concepción de María", tipo: "inamovible" },
-    { mes: 12, dia: 25, motivo: "Navidad", tipo: "inamovible" },
-    { mes: 12, dia: 31, motivo: "Fin de Año", tipo: "inamovible" }
-];
-
-// --- CONFIGURACIÓN ---
-const feriadosUSA = [
-    { mes: 1, dia: 1, motivo: "New Year's Day", tipo: "Federal" },
-    { mes: 1, dia: 19, motivo: "Martin Luther King Jr. Day", tipo: "Federal" },
-    { mes: 2, dia: 16, motivo: "Washington's Birthday (Presidents' Day)", tipo: "Federal" },
-    { mes: 3, dia: 3, motivo: "Good Friday", tipo: "Observance" },
-    { mes: 5, dia: 25, motivo: "Memorial Day", tipo: "Federal" },
-    { mes: 6, dia: 19, motivo: "Juneteenth National Independence Day", tipo: "Federal" },
-    { mes: 7, dia: 3, motivo: "Independence Day (Observed)", tipo: "Federal" },
-    { mes: 7, dia: 4, motivo: "Independence Day", tipo: "Federal" },
-    { mes: 9, dia: 7, motivo: "Labor Day", tipo: "Federal" },
-    { mes: 10, dia: 12, motivo: "Columbus Day", tipo: "Federal" },
-    { mes: 11, dia: 11, motivo: "Veterans Day", tipo: "Federal" },
-    { mes: 11, dia: 26, motivo: "Thanksgiving Day", tipo: "Federal" },
-    { mes: 12, dia: 25, motivo: "Christmas Day", tipo: "Federal" }
-];
-
-// --- FUNCIONES AUXILIARES ---
-function getFeriadoAR(fecha) {
-    const year = fecha.getYear();
-    const mes = fecha.getMonth() + 1;
-    const dia = fecha.getDate();
-    const feriadoObj = feriados.find(f => f.dia === dia && f.mes === mes);
-    if (feriadoObj) {
-        const feriado = feriadoObj;
-        return {
-            motivo: feriado.motivo,
-            fecha: `${dia}/${mes}/${year}`,
-            info: feriado.info,
-            tipo: feriado.tipo,
-            //id: feriado.id
-        };
-    } else {
-        return null;
-    }
-}
-
-function getFeriadoUSA(fecha) {
-    const mes = fecha.getMonth() + 1;
-    const dia = fecha.getDate();
-    return feriadosUSA.find(f => f.mes === mes && f.dia === dia) || null;
-}
 
 function getTipoDia({ feriadoAR, feriadoUSA, diaSemana, hour }) {
     let tipo = [];
@@ -107,36 +35,33 @@ function getTipoDia({ feriadoAR, feriadoUSA, diaSemana, hour }) {
         esFeriado: tipo.some(t => t.includes("Feriado"))
     };
 }
+
 function generateAnalysisPrompt(items) {
-
-    // --- LÓGICA PRINCIPAL ---
-    const now = new Date();
-    // Crear un objeto Date que represente la hora en Argentina (para extraer hora y día correctamente en entorno UTC)
-    const argTimeStr = now.toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" });
-    const hoy = new Date(argTimeStr);
-
-    const hour = hoy.getHours();
-    const diaSemana = hoy.getDay(); // 0=Domingo, 6=Sábado
+    // Obtener fecha/hora actual en Argentina
+    const { hour, day, month, year, weekday, asUTCDate: hoy } = getArgentinaTime();
+    const diaSemana = weekday === 7 ? 0 : weekday; // Convertir ISO (7=Dom) a JS (0=Dom)
 
     // Estado de hoy
-    const feriadoAR = getFeriadoAR(hoy);
-    const feriadoUSA = getFeriadoUSA(hoy);
+    const feriadoAR = getFeriadoAR({ month, day });
+    const feriadoUSA = getFeriadoUSA({ month, day });
     const tipoHoy = getTipoDia({ feriadoAR, feriadoUSA, diaSemana, hour });
 
     // Estado de mañana
     const manana = new Date(hoy);
-    manana.setDate(hoy.getDate() + 1);
-    const feriadoARManana = getFeriadoAR(manana);
-    const feriadoUSAManana = getFeriadoUSA(manana);
-    const diaSemanaManana = manana.getDay();
-    const tipoManana = getTipoDia({ feriadoAR: feriadoARManana, feriadoUSA: feriadoUSAManana, diaSemana: diaSemanaManana, hour: 10 }); // hour=10 para Pre-Market
+    manana.setUTCDate(hoy.getUTCDate() + 1);
+    const mananaMonth = manana.getUTCMonth() + 1;
+    const mananaDay = manana.getUTCDate();
+    const diaSemanaManana = manana.getUTCDay();
+    const feriadoARManana = getFeriadoAR({ month: mananaMonth, day: mananaDay });
+    const feriadoUSAManana = getFeriadoUSA({ month: mananaMonth, day: mananaDay });
+    const tipoManana = getTipoDia({ feriadoAR: feriadoARManana, feriadoUSA: feriadoUSAManana, diaSemana: diaSemanaManana, hour: 10 });
 
     // --- HEADER ---
     const header = `
-📅 Fecha actual: ${hoy.toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+📅 Fecha actual: ${hoy.toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: TIMEZONE })}
 📌 Tipo de día: ${tipoHoy.tipo}${tipoHoy.motivo ? ` (${tipoHoy.motivo}${tipoHoy.tipoFeriado ? ', ' + tipoHoy.tipoFeriado : ''})` : ''}
-📅 Estado de mañana: ${manana.toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-📌 Tipo de día mañana: ${tipoManana.tipo}${tipoManana.motivo ? ` (${tipoManana.motivo}${tipoManana.tipoManana ? ', ' + tipoManana.tipoFeriado : ''})` : ''}
+📅 Estado de mañana: ${manana.toLocaleDateString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: TIMEZONE })}
+📌 Tipo de día mañana: ${tipoManana.tipo}${tipoManana.motivo ? ` (${tipoManana.motivo}${tipoManana.tipoFeriado ? ', ' + tipoManana.tipoFeriado : ''})` : ''}
 `;
 
     const footer = `
