@@ -47,7 +47,7 @@ jobs:
           aws-region: "${{ vars.AWS_REGION }}"
 
       - name: Zip Lambda
-        run: zip -r lambda.zip index.mjs
+        run: zip -r lambda.zip *.mjs
 
       - name: Update Lambda Code
         run: aws lambda update-function-code --function-name ${{ vars.PROCESSOR_FUNCTION_NAME }} --zip-file fileb://lambda.zip
