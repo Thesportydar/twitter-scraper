@@ -46,6 +46,7 @@ resource "aws_lambda_function" "processor_lambda" {
       LOG_LEVEL    = "INFO"
       GITHUB_OWNER = var.github_owner
       GITHUB_REPO  = var.github_repo
+      OPENAI_MODEL  = var.openai_model
     }
   }
 }

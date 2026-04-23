@@ -369,7 +369,7 @@ export const handler = async (event) => {
         // 2. Llamar a OpenAI
         const client = new OpenAI({ apiKey: OPENAI_API_KEY });
         const res = await client.responses.create({
-            model: "gpt-5-nano",
+            model: process.env.OPENAI_MODEL || 'gpt-5-nano',
             input: prompt,
         });
 

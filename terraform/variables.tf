@@ -87,3 +87,9 @@ variable "task_role_name" {
   type        = string
   default     = "TwitterScraperTaskRole"
 }
+
+variable "openai_model" {
+  description = "The OpenAI model to use for processing tweets"
+  type        = string
+  default     = "gpt-5.4"
+}
