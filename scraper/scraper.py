@@ -5,13 +5,18 @@ import time
 import random
 import boto3
 from boto3.dynamodb.conditions import Key
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import logging
 import asyncio
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 import collections
+import re
+from io import BytesIO
+
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -24,6 +29,27 @@ HEADLESS = os.getenv("HEADLESS", "true").lower() in ("1", "true", "yes")
 DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", "Tweet")
 S3_BUCKET = os.getenv("S3_BUCKET")
 EVENT_BUS_NAME = os.getenv("EVENT_BUS_NAME", "default")
+
+# Tweet URL pattern: https://x.com/{user_handle}/status/{tweet_id}
+URL_PATTERN = re.compile(r"x\.com/([^/]+)/status/(\d+)")
+
+# Parquet schema — must match the Athena table in athena_tweets.sql
+PARQUET_SCHEMA = pa.schema([
+    pa.field("tweet_id",         pa.string()),
+    pa.field("user_handle",      pa.string()),
+    pa.field("content",          pa.string()),
+    pa.field("tweet_timestamp",  pa.timestamp("us", tz="UTC")),
+    pa.field("crawl_timestamp",  pa.timestamp("us", tz="UTC")),
+    pa.field("is_retweet",       pa.bool_()),
+    pa.field("has_image",        pa.bool_()),
+    pa.field("url",              pa.string()),
+    pa.field("crawl_year",       pa.int32()),
+    pa.field("crawl_month",      pa.int32()),
+    pa.field("crawl_day",        pa.int32()),
+    pa.field("tweet_year",       pa.int32()),
+    pa.field("tweet_month",      pa.int32()),
+    pa.field("tweet_day",        pa.int32()),
+])
 
 def send_cloudwatch_metrics(metrics):
     """Envía métricas a CloudWatch para monitoreo."""
@@ -45,6 +71,81 @@ def send_cloudwatch_metrics(metrics):
     except Exception as e:
         logger.error(f"Error enviando métricas a CloudWatch: {e}")
 
+def upload_parquet_to_s3(tweets, now, s3):
+    """
+    Escribe un Parquet Snappy en processed/ con el schema limpio para Athena.
+    El nombre de archivo coincide con el JSON en data/ para facilitar correlación.
+    Fallo aislado: un error aquí no corta el flujo principal.
+    """
+    crawl_ts    = now.astimezone(timezone.utc)
+    crawl_year  = now.year
+    crawl_month = now.month
+    crawl_day   = now.day
+
+    tweet_ids, user_handles, contents          = [], [], []
+    tweet_timestamps, crawl_timestamps         = [], []
+    is_retweets, has_images, urls              = [], [], []
+    c_years, c_months, c_days                  = [], [], []
+    t_years, t_months, t_days                  = [], [], []
+
+    for t in tweets:
+        url = t.get("url") or ""
+        m = URL_PATTERN.search(url)
+        user_handle = m.group(1) if m else None
+        tweet_id    = m.group(2) if m else None
+
+        date_str = t.get("date") or ""
+        try:
+            tweet_ts = datetime.fromisoformat(
+                date_str.replace("Z", "+00:00")
+            ).astimezone(timezone.utc)
+        except (ValueError, AttributeError):
+            tweet_ts = None
+
+        tweet_ids.append(tweet_id)
+        user_handles.append(user_handle)
+        contents.append(t.get("content"))
+        tweet_timestamps.append(tweet_ts)
+        crawl_timestamps.append(crawl_ts)
+        is_retweets.append(bool(t.get("is_retweet")))
+        has_images.append(bool(t.get("has_image")))
+        urls.append(url)
+        c_years.append(crawl_year)
+        c_months.append(crawl_month)
+        c_days.append(crawl_day)
+        t_years.append(tweet_ts.year   if tweet_ts else None)
+        t_months.append(tweet_ts.month if tweet_ts else None)
+        t_days.append(tweet_ts.day     if tweet_ts else None)
+
+    table = pa.table(
+        {
+            "tweet_id":        tweet_ids,
+            "user_handle":     user_handles,
+            "content":         contents,
+            "tweet_timestamp": pa.array(tweet_timestamps, type=pa.timestamp("us", tz="UTC")),
+            "crawl_timestamp": pa.array(crawl_timestamps, type=pa.timestamp("us", tz="UTC")),
+            "is_retweet":      is_retweets,
+            "has_image":       has_images,
+            "url":             urls,
+            "crawl_year":      pa.array(c_years,   type=pa.int32()),
+            "crawl_month":     pa.array(c_months,  type=pa.int32()),
+            "crawl_day":       pa.array(c_days,    type=pa.int32()),
+            "tweet_year":      pa.array(t_years,   type=pa.int32()),
+            "tweet_month":     pa.array(t_months,  type=pa.int32()),
+            "tweet_day":       pa.array(t_days,    type=pa.int32()),
+        },
+        schema=PARQUET_SCHEMA,
+    )
+
+    buf = BytesIO()
+    pq.write_table(table, buf, compression="snappy")
+
+    file_name = f"tweets_{now.strftime('%H-%M-%S')}.parquet"
+    key = f"processed/crawl_year={crawl_year}/crawl_month={crawl_month}/{file_name}"
+    s3.put_object(Bucket=S3_BUCKET, Key=key, Body=buf.getvalue())
+    logger.info(f"Parquet escrito: s3://{S3_BUCKET}/{key} ({len(tweets)} tweets)")
+
+
 def upload_to_s3(tweets):
     """Sube todos los tweets de la ejecución a S3 particionados por fecha de scraping."""
     if not tweets or not S3_BUCKET:
@@ -54,12 +155,12 @@ def upload_to_s3(tweets):
     # Usar explícitamente hora Argentina
     tz_arg = ZoneInfo("America/Argentina/Buenos_Aires")
     now = datetime.now(tz_arg)
-    
+
     try:
         # Estructura: year=YYYY/month=MM/day=DD/tweets_HH-MM-SS.json
         file_name = f"tweets_{now.strftime('%H-%M-%S')}.json"
         key = f"data/year={now.year}/month={now.month:02d}/day={now.day:02d}/{file_name}"
-        
+
         s3.put_object(
             Bucket=S3_BUCKET,
             Key=key,
@@ -67,7 +168,7 @@ def upload_to_s3(tweets):
             ContentType='application/json'
         )
         logger.info(f"Subidos {len(tweets)} tweets a s3://{S3_BUCKET}/{key}")
-        
+
         # Enviar evento a EventBridge
         eb = boto3.client('events')
         event_payload = {
@@ -76,7 +177,7 @@ def upload_to_s3(tweets):
             "count": len(tweets),
             "status": "ok"
         }
-        
+
         eb.put_events(
             Entries=[
                 {
@@ -88,9 +189,15 @@ def upload_to_s3(tweets):
             ]
         )
         logger.info(f"Evento enviado a EventBridge: {event_payload}")
-        
+
     except Exception as e:
         logger.error(f"Error subiendo a S3 o enviando evento: {e}")
+
+    # Escribir Parquet limpio para Athena — fallo aislado, no corta el flujo principal
+    try:
+        upload_parquet_to_s3(tweets, now, s3)
+    except Exception as e:
+        logger.error(f"Error escribiendo Parquet a S3: {e}")
 
 def save_tweets_to_db(tweets, user):
     """Guarda los tweets en DynamoDB con batch insert y TTL de 72hs."""

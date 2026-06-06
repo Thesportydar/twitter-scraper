@@ -32,6 +32,23 @@ resource "aws_s3_bucket_public_access_block" "scraper_public_access" {
   restrict_public_buckets = true
 }
 
+resource "aws_s3_bucket_lifecycle_configuration" "scraper_lifecycle" {
+  bucket = aws_s3_bucket.scraper.id
+
+  rule {
+    id     = "expire-raw-json"
+    status = "Enabled"
+
+    filter {
+      prefix = "data/"
+    }
+
+    expiration {
+      days = 7
+    }
+  }
+}
+
 resource "aws_s3_bucket_server_side_encryption_configuration" "scraper_sse" {
   bucket = aws_s3_bucket.scraper.id
 

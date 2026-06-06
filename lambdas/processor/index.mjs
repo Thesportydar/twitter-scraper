@@ -80,7 +80,7 @@ function generateAnalysisPrompt(items) {
         const autorOriginal = item.url.match(/x\.com\/(.*?)\//)?.[1] || "desconocido";
         const fecha = new Date(item.date).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" });
         const tieneImagen = item.has_image ? " - [Contiene imagen/s]" : "";
-        const prefijo = item.is_retweet ? ` - [RETWEET por @${item.user || "desconocido"}] ` : "";
+        const prefijo = item.is_retweet ? " - [RETWEET]" : "";
 
         return `Tweet de @${autorOriginal} #${i + 1} - Publicado el ${fecha}${tieneImagen}${prefijo}\n${item.content.replace(/\n/g, ' ')}`;
     }).join('\n\n');
