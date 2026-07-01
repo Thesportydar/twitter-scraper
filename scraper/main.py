@@ -3,7 +3,7 @@ import json
 import asyncio
 import boto3
 import logging
-from scraper import async_scrape_multiple_users_with_stealth
+from scraper import async_scrape_multiple_users_with_stealth, async_scrape_feed_with_stealth
 
 # Configuración de Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -90,23 +90,43 @@ async def main():
     logger.info("Iniciando ejecución del scraper...")
     
     try:
-        # Configurar entorno (SSM)
-        cookies, user_configs = setup_environment()
+        cookies, all_configs = setup_environment()
         
-        # Ejecutar scraping
-        if user_configs:
-            # Ajustar parámetros por defecto si no vienen en el JSON
-            for cfg in user_configs:
-                if "max_idle_scrolls" not in cfg:
-                    cfg["max_idle_scrolls"] = 2
-                if "modo_humano" not in cfg:
-                    cfg["modo_humano"] = True
+        # Separar configs de feed de configs de usuarios
+        feed_configs  = [c for c in all_configs if c.get("mode") == "feed"]
+        user_configs  = [c for c in all_configs if c.get("mode") != "feed"]
 
-            logger.info("Iniciando scraping asíncrono...")
-            nuevos_tweets = await async_scrape_multiple_users_with_stealth(user_configs, cookies)
-            logger.info(f"Ejecución finalizada. Total tweets nuevos: {len(nuevos_tweets)}")
-        else:
-            logger.warning("No se encontraron configuraciones de usuarios para procesar.")
+        total_nuevos = 0
+
+        # --- Modo feed ---
+        for cfg in feed_configs:
+            max_tweets      = int(cfg.get("max_tweets", 100))
+            max_idle_scrolls = int(cfg.get("max_idle_scrolls", 5))
+            logger.info(f"Iniciando scraping de feed (max_tweets={max_tweets}, max_idle_scrolls={max_idle_scrolls})...")
+            nuevos = await async_scrape_feed_with_stealth(
+                cookies,
+                max_tweets=max_tweets,
+                max_idle_scrolls=max_idle_scrolls,
+            )
+            logger.info(f"Feed finalizado. Tweets nuevos: {len(nuevos)}")
+            total_nuevos += len(nuevos)
+
+        # --- Modo usuarios ---
+        if user_configs:
+            # Defaults para campos opcionales
+            for cfg in user_configs:
+                cfg.setdefault("max_idle_scrolls", 2)
+                cfg.setdefault("modo_humano", True)
+
+            logger.info(f"Iniciando scraping de {len(user_configs)} usuario(s)...")
+            nuevos = await async_scrape_multiple_users_with_stealth(user_configs, cookies)
+            logger.info(f"Scraping de usuarios finalizado. Tweets nuevos: {len(nuevos)}")
+            total_nuevos += len(nuevos)
+
+        if not feed_configs and not user_configs:
+            logger.warning("No se encontraron configuraciones para procesar.")
+
+        logger.info(f"Ejecución finalizada. Total tweets nuevos: {total_nuevos}")
             
     except Exception as e:
         logger.critical(f"Error crítico en la ejecución principal: {e}")

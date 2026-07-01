@@ -652,6 +652,160 @@ async def async_scrape_multiple_users_with_stealth(user_configs, cookies, max_co
         except Exception as e:
             logger.warning(f"Error cerrando browser/context: {e}")
 
+async def async_scrape_feed_with_stealth(cookies, max_tweets=100, max_idle_scrolls=5):
+    """
+    Scrapea el feed 'Following' de /home hasta max_tweets tweets.
+    Intenta hacer click en la pestaña 'Following' con múltiples selectores XPath.
+    Si ninguno funciona, usa el feed que esté activo por defecto.
+    """
+    if not cookies:
+        logger.error("⚠️ No se proporcionaron cookies.")
+        return []
+
+    # Selectores para la pestaña Following — intentados en orden
+    FOLLOWING_TAB_XPATHS = [
+        "xpath=//nav[@role='navigation']//div[@role='tab'][.//span[normalize-space()='Following']]",
+        "xpath=//nav[@aria-live='polite']//div[@role='tab'][.//span[normalize-space()='Following']]",
+        "xpath=//div[@role='tablist']//div[@role='tab'][.//span[normalize-space()='Following']]",
+    ]
+
+    todos_nuevos = []
+    browser = None
+    context = None
+    page = None
+
+    try:
+        async with Stealth().use_async(async_playwright()) as p:
+            browser = await p.chromium.launch(headless=HEADLESS)
+            context = await browser.new_context()
+            await context.add_cookies(cookies)
+            page = await context.new_page()
+
+            logger.info("Navegando a /home para scraping de feed...")
+            await page.goto("https://x.com/home", timeout=60000)
+
+            if any(x in page.url for x in ["login", "unsupported-browser", "consent", "challenge", "error"]):
+                logger.error(f"⚠️ Bloqueo detectado al navegar a /home (url: {page.url})")
+                return []
+
+            await page.wait_for_selector("[data-testid='tweet']", timeout=30000, state="visible")
+            await asyncio.sleep(random.uniform(1.0, 2.0))
+
+            # Intentar click en pestaña Following
+            # X requiere el doble click con pausa: click → 3s → click → 3s → scraping
+            tab_clicked = False
+            for xpath in FOLLOWING_TAB_XPATHS:
+                try:
+                    tab = await page.query_selector(xpath)
+                    if tab:
+                        logger.info(f"Click #1 en 'Following' con selector: {xpath}")
+                        await tab.click()
+                        await asyncio.sleep(3.0)
+
+                        # Segundo click en el mismo selector (re-query para evitar stale element)
+                        tab = await page.query_selector(xpath)
+                        if tab:
+                            logger.info("Click #2 en 'Following'")
+                            await tab.click()
+                            await asyncio.sleep(3.0)
+
+                        await page.wait_for_selector("[data-testid='tweet']", timeout=15000, state="visible")
+                        tab_clicked = True
+                        break
+                except Exception as e:
+                    logger.warning(f"Selector '{xpath}' falló: {e}")
+
+            if not tab_clicked:
+                logger.warning("No se encontró la pestaña 'Following'. Usando el feed activo por defecto.")
+
+            # Scroll + extracción
+            tweets = []
+            tweet_ids = set()
+            idle_scrolls = 0
+
+            while len(tweets) < max_tweets and idle_scrolls < max_idle_scrolls:
+                tweet_elements = await page.query_selector_all("[data-testid='tweet']")
+                new_found = False
+
+                for tweet in tweet_elements:
+                    try:
+                        link_el = await tweet.query_selector('a[href*="/status/"]')
+                        content_el = await tweet.query_selector("[data-testid='tweetText']")
+                        time_el = await tweet.query_selector("time")
+
+                        if not (link_el and content_el and time_el):
+                            continue
+
+                        link = await link_el.get_attribute('href')
+                        tweet_id = link.split("/")[-1]
+
+                        if tweet_id in tweet_ids:
+                            continue
+
+                        social_context = await tweet.query_selector('span[data-testid="socialContext"]')
+                        is_retweet = False
+                        if social_context:
+                            text = (await social_context.inner_text()).lower()
+                            if "reposteó" in text or "retweeted" in text:
+                                is_retweet = True
+
+                        has_image = bool(await tweet.query_selector('img[src*="twimg.com/media/"]'))
+
+                        tweet_data = {
+                            "content": await get_full_tweet_text(tweet, f"https://x.com{link}", context),
+                            "date": await time_el.get_attribute("datetime"),
+                            "url": f"https://x.com{link}",
+                            "is_retweet": is_retweet,
+                            "has_image": has_image
+                        }
+
+                        if not tweet_data["content"] or not tweet_data["date"] or not tweet_data["url"]:
+                            continue
+
+                        tweets.append(tweet_data)
+                        tweet_ids.add(tweet_id)
+                        new_found = True
+
+                        if len(tweets) >= max_tweets:
+                            break
+                    except Exception as e:
+                        logger.error(f"Error extrayendo tweet del feed: {e}")
+                        continue
+
+                if not new_found:
+                    idle_scrolls += 1
+                else:
+                    idle_scrolls = 0
+
+                if len(tweets) < max_tweets and idle_scrolls < max_idle_scrolls:
+                    await page.evaluate("window.scrollBy(0, window.innerHeight)")
+                    pause = random.uniform(1.2, 2.5) if MODO_HUMANO else random.uniform(0.8, 1.5)
+                    await asyncio.sleep(pause)
+
+            logger.info(f"Feed scrapeado: {len(tweets)} tweets extraídos en total.")
+            # "__feed__" como user para que DynamoDB indexe por modo; el user_handle real
+            # queda en el Parquet vía URL_PATTERN igual que siempre.
+            nuevos = save_tweets_to_db(tweets, "__feed__")
+            logger.info(f"{len(nuevos)} tweets nuevos del feed guardados.")
+            todos_nuevos.extend(nuevos)
+
+            if todos_nuevos:
+                upload_to_s3(todos_nuevos)
+
+            return todos_nuevos
+
+    except Exception as e:
+        logger.error(f"Error general en async_scrape_feed_with_stealth: {e}")
+        return []
+    finally:
+        try:
+            if page: await page.close()
+            if context: await context.close()
+            if browser: await browser.close()
+        except Exception as e:
+            logger.warning(f"Error cerrando browser/context en feed: {e}")
+
+
 # Ejemplo de uso
 if __name__ == "__main__":
     # Ejecutar solo una vez para guardar cookies
