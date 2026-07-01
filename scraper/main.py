@@ -9,6 +9,8 @@ from scraper import async_scrape_multiple_users_with_stealth
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
+LOCAL_TEST = os.getenv("LOCAL_TEST", "false").lower() in ("true", "1", "yes")
+
 def get_ssm_parameter(param_name):
     """Obtiene un parámetro de SSM Parameter Store."""
     ssm = boto3.client('ssm')
@@ -20,12 +22,50 @@ def get_ssm_parameter(param_name):
         raise
 
 def setup_environment():
-    """Configura el entorno obteniendo cookies y configs de SSM."""
+    """Configura el entorno obteniendo cookies y configs de SSM (o localmente si LOCAL_TEST es True)."""
     
     cookies = []
     user_configs = []
 
-    # 1. Obtener Cookies
+    if LOCAL_TEST:
+        logger.info("[LOCAL TEST] Configurando entorno local (sin SSM)...")
+        
+        # 1. Cargar Cookies
+        cookies_file = "cookies.json"
+        if os.path.exists(cookies_file):
+            try:
+                with open(cookies_file, "r") as f:
+                    cookies = json.load(f)
+                logger.info(f"[LOCAL TEST] Cookies cargadas desde archivo local: {cookies_file}")
+            except Exception as e:
+                logger.error(f"[LOCAL TEST] Error leyendo cookies locales: {e}")
+        else:
+            logger.warning(f"[LOCAL TEST] Archivo '{cookies_file}' no encontrado. Playwright podría fallar si se requiere sesión.")
+
+        # 2. Cargar User Configs
+        config_file = "user_configs.json"
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, "r") as f:
+                    user_configs = json.load(f)
+                logger.info(f"[LOCAL TEST] Configuración de usuarios cargada desde: {config_file} ({len(user_configs)} usuarios)")
+            except Exception as e:
+                logger.error(f"[LOCAL TEST] Error leyendo {config_file}: {e}")
+                raise
+        else:
+            logger.info("[LOCAL TEST] 'user_configs.json' no encontrado. Usando config mock por defecto (@SalvaDiStefano).")
+            user_configs = [
+                {
+                    "username": "SalvaDiStefano",
+                    "max_tweets": 2,
+                    "max_idle_scrolls": 2,
+                    "modo_humano": True
+                }
+            ]
+
+        return cookies, user_configs
+
+    # 1. Obtener Cookies desde SSM
     cookies_param = os.getenv("SSM_COOKIES_PARAM", "/twitter-scraper/cookies")
     try:
         cookies_json = get_ssm_parameter(cookies_param)
@@ -34,7 +74,7 @@ def setup_environment():
     except Exception as e:
         logger.error(f"No se pudieron cargar las cookies. El scraper probablemente fallará. Error: {e}")
 
-    # 2. Obtener User Configs
+    # 2. Obtener User Configs desde SSM
     config_param = os.getenv("SSM_CONFIG_PARAM", "/twitter-scraper/user-configs")
     try:
         config_json = get_ssm_parameter(config_param)
