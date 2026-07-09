@@ -11,8 +11,10 @@ venv/
 env/
 .venv/
 *.log
-scraper/tweets.db
-scraper/twitter_cookies.json
+scraper/user_configs.json
+scraper/cookies.json
+scraper/local_dynamodb.json
+scraper/local_s3/
 
 # Node.js (Lambda & Frontend)
 node_modules/
