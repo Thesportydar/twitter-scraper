@@ -1,0 +1,105 @@
+---
+interface Props {
+  author?: string;
+  handle: string;
+  text: string;
+  date?: string;
+  url?: string;
+}
+const { author, handle, text, date, url } = Astro.props;
+const displayName = author || handle;
+
+// Format URL to be handle-agnostic (x.com/i/status/...) to avoid broken links
+const safeUrl = url
+  ? url.replace(/x\.com\/[^\/]+\/status/, "x.com/i/status")
+  : null;
+---
+
+<div class="tweet-card">
+  <div class="tweet-header">
+    <div class="tweet-author-info">
+      <span class="author-name">{author ? author : `@${handle}`}</span>
+      {author && <span class="author-handle">@{handle}</span>}
+    </div>
+    {
+      safeUrl && (
+        <a
+          href={safeUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="tweet-link"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            width="18"
+            height="18"
+            fill="currentColor"
+          >
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 22.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+          </svg>
+        </a>
+      )
+    }
+  </div>
+  <p class="tweet-text">{text}</p>
+  {date && <span class="tweet-date">{date}</span>}
+</div>
+
+<style>
+  .tweet-card {
+    background-color: #15202b;
+    border: 1px solid #38444d;
+    border-radius: 12px;
+    padding: 1rem;
+    margin: 1.5rem 0;
+    color: #ffffff;
+    font-family:
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      Roboto,
+      sans-serif;
+  }
+  .tweet-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+  .tweet-author-info {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .author-name {
+    font-weight: bold;
+    color: #ffffff;
+  }
+  .author-handle {
+    color: #aab8c2;
+  }
+  .tweet-link {
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    transition: opacity 0.2s ease;
+  }
+  .tweet-link:hover {
+    opacity: 0.8;
+  }
+  .tweet-text {
+    margin: 0;
+    line-height: 1.5;
+    font-size: 15px;
+  }
+  .tweet-date {
+    color: #8899a6;
+    font-size: 13px;
+    display: block;
+    margin-top: 0.5rem;
+  }
+</style>

@@ -73,6 +73,7 @@ function generateAnalysisPrompt(items) {
 - Si está marcado como [RETWEET por @usuario], tené en cuenta que @usuario está amplificando un mensaje de otro autor.
 - Tweets vagos o ambiguos (especialmente si dependen de imágenes o capturas) deben ser ignorados o señalados como fuera de contexto.
 - No incluyas frases de ofrecimiento, disponibilidad, ni cierres tipo "quedo a disposición", "consultame", "espero tus comentarios", etc. Limítate al análisis solicitado.
+- Cuando quieras citar o destacar un tweet, NO uses blockquotes de Markdown (>). DEBES usar el componente <TweetCard> con la sintaxis exacta de JSX: <TweetCard handle="usuario" text="Texto exacto del tweet..." url="URL_del_tweet" />. Asegúrate de escapar las comillas dobles dentro del texto del tweet.
 `;
 
     // --- TWEETS ---
@@ -82,7 +83,7 @@ function generateAnalysisPrompt(items) {
         const tieneImagen = item.has_image ? " - [Contiene imagen/s]" : "";
         const prefijo = item.is_retweet ? " - [RETWEET]" : "";
 
-        return `Tweet de @${autorOriginal} #${i + 1} - Publicado el ${fecha}${tieneImagen}${prefijo}\n${item.content.replace(/\n/g, ' ')}`;
+        return `Tweet de @${autorOriginal} #${i + 1} - URL: ${item.url} - Publicado el ${fecha}${tieneImagen}${prefijo}\n${item.content.replace(/\n/g, ' ')}`;
     }).join('\n\n');
 
     let prompt = '';
@@ -280,7 +281,7 @@ heroImage: '${heroMap[tipo] || '../../assets/hero-feriado.webp'}'
 ---`;
 
     return {
-        filename: `${fechaISO}-${tipo.replace(/\s/g, '-').toLowerCase()}.md`,
+        filename: `${fechaISO}-${tipo.replace(/\s/g, '-').toLowerCase()}.mdx`,
         content: `${frontmatter}\n\n${contenido}`
     }
 };
