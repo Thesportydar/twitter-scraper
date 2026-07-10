@@ -633,10 +633,6 @@ async def async_scrape_multiple_users_with_stealth(user_configs, cookies, max_co
                     # Espera antes de reintentar
                     await asyncio.sleep(5 + 5*retries)
             
-            # Subir todos los tweets nuevos de esta sesión a S3
-            if todos_nuevos:
-                upload_to_s3(todos_nuevos)
-                
             return todos_nuevos
     except Exception as e:
         logger.error(f"Error general en async_scrape_multiple_users_with_stealth: {e}")
@@ -788,9 +784,6 @@ async def async_scrape_feed_with_stealth(cookies, max_tweets=100, max_idle_scrol
             nuevos = save_tweets_to_db(tweets, "__feed__")
             logger.info(f"{len(nuevos)} tweets nuevos del feed guardados.")
             todos_nuevos.extend(nuevos)
-
-            if todos_nuevos:
-                upload_to_s3(todos_nuevos)
 
             return todos_nuevos
 

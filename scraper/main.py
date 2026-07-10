@@ -3,7 +3,7 @@ import json
 import asyncio
 import boto3
 import logging
-from scraper import async_scrape_multiple_users_with_stealth, async_scrape_feed_with_stealth
+from scraper import async_scrape_multiple_users_with_stealth, async_scrape_feed_with_stealth, upload_to_s3
 
 # Configuración de Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -96,7 +96,7 @@ async def main():
         feed_configs  = [c for c in all_configs if c.get("mode") == "feed"]
         user_configs  = [c for c in all_configs if c.get("mode") != "feed"]
 
-        total_nuevos = 0
+        todos_nuevos = []
 
         # --- Modo feed ---
         for cfg in feed_configs:
@@ -109,7 +109,7 @@ async def main():
                 max_idle_scrolls=max_idle_scrolls,
             )
             logger.info(f"Feed finalizado. Tweets nuevos: {len(nuevos)}")
-            total_nuevos += len(nuevos)
+            todos_nuevos.extend(nuevos)
 
         # --- Modo usuarios ---
         if user_configs:
@@ -121,16 +121,24 @@ async def main():
             logger.info(f"Iniciando scraping de {len(user_configs)} usuario(s)...")
             nuevos = await async_scrape_multiple_users_with_stealth(user_configs, cookies)
             logger.info(f"Scraping de usuarios finalizado. Tweets nuevos: {len(nuevos)}")
-            total_nuevos += len(nuevos)
+            todos_nuevos.extend(nuevos)
 
         if not feed_configs and not user_configs:
             logger.warning("No se encontraron configuraciones para procesar.")
 
-        logger.info(f"Ejecución finalizada. Total tweets nuevos: {total_nuevos}")
+        # Upload único con todos los tweets combinados → un solo archivo en S3 → un solo evento TweetsUploaded
+        if todos_nuevos:
+            logger.info(f"Subiendo {len(todos_nuevos)} tweets totales a S3 (feed + usuarios)...")
+            upload_to_s3(todos_nuevos)
+        else:
+            logger.info("No hay tweets nuevos para subir.")
+
+        logger.info(f"Ejecución finalizada. Total tweets nuevos: {len(todos_nuevos)}")
             
     except Exception as e:
         logger.critical(f"Error crítico en la ejecución principal: {e}")
         exit(1)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
