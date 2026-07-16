@@ -73,7 +73,7 @@ function generateAnalysisPrompt(items) {
 - Si está marcado como [RETWEET por @usuario], tené en cuenta que @usuario está amplificando un mensaje de otro autor.
 - Tweets vagos o ambiguos (especialmente si dependen de imágenes o capturas) deben ser ignorados o señalados como fuera de contexto.
 - No incluyas frases de ofrecimiento, disponibilidad, ni cierres tipo "quedo a disposición", "consultame", "espero tus comentarios", etc. Limítate al análisis solicitado.
-- Cuando quieras citar o destacar un tweet, NO uses blockquotes de Markdown (>). DEBES usar el componente <TweetCard> con la sintaxis exacta de JSX: <TweetCard handle="usuario" text="Texto exacto del tweet..." url="URL_del_tweet" />. Asegúrate de escapar las comillas dobles dentro del texto del tweet.
+- Cuando quieras citar o destacar un tweet, NO uses blockquotes de Markdown (>). DEBES usar el componente <TweetCard> con la sintaxis exacta de JSX. Para evitar errores de parseo con las comillas dobles en MDX, usa llaves y backticks para el texto: <TweetCard handle="usuario" text={\`Texto exacto del tweet...\`} url="URL_del_tweet" />. NO escapes las comillas dobles dentro del texto.
 `;
 
     // --- TWEETS ---
