@@ -50,6 +50,34 @@ def write_local_db(tweets):
     except Exception as e:
         logger.error(f"Error al escribir en {LOCAL_DB_FILE}: {e}")
 
+def normalize_cookies(cookies):
+    """Normaliza las cookies para cumplir con la validación estricta de Playwright."""
+    if not cookies:
+        return []
+    valid_same_site = {"Strict", "Lax", "None"}
+    mapping = {
+        "no_restriction": "None",
+        "none": "None",
+        "lax": "Lax",
+        "strict": "Strict",
+    }
+    normalized = []
+    for c in cookies:
+        if not isinstance(c, dict):
+            continue
+        cookie = dict(c)
+        same_site = cookie.get("sameSite")
+        if same_site and isinstance(same_site, str):
+            normalized_val = mapping.get(same_site.lower(), same_site.capitalize())
+            if normalized_val in valid_same_site:
+                cookie["sameSite"] = normalized_val
+            else:
+                cookie.pop("sameSite", None)
+        else:
+            cookie.pop("sameSite", None)
+        normalized.append(cookie)
+    return normalized
+
 # Tweet URL pattern: https://x.com/{user_handle}/status/{tweet_id}
 URL_PATTERN = re.compile(r"x\.com/([^/]+)/status/(\d+)")
 
@@ -498,6 +526,8 @@ async def async_scrape_multiple_users_with_stealth(user_configs, cookies, max_co
         logger.error("⚠️ No se proporcionaron cookies.")
         return []
 
+    cookies = normalize_cookies(cookies)
+
     todos_nuevos = []
     browser = None
     context = None
@@ -657,6 +687,8 @@ async def async_scrape_feed_with_stealth(cookies, max_tweets=100, max_idle_scrol
     if not cookies:
         logger.error("⚠️ No se proporcionaron cookies.")
         return []
+
+    cookies = normalize_cookies(cookies)
 
     # Selectores para la pestaña Following — intentados en orden
     FOLLOWING_TAB_XPATHS = [
