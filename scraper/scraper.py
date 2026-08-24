@@ -5,18 +5,13 @@ import time
 import random
 import boto3
 from boto3.dynamodb.conditions import Key
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import logging
 import asyncio
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 import collections
-import re
-from io import BytesIO
-
-import pyarrow as pa
-import pyarrow.parquet as pq
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -78,27 +73,6 @@ def normalize_cookies(cookies):
         normalized.append(cookie)
     return normalized
 
-# Tweet URL pattern: https://x.com/{user_handle}/status/{tweet_id}
-URL_PATTERN = re.compile(r"x\.com/([^/]+)/status/(\d+)")
-
-# Parquet schema — must match the Athena table in athena_tweets.sql
-PARQUET_SCHEMA = pa.schema([
-    pa.field("tweet_id",         pa.string()),
-    pa.field("user_handle",      pa.string()),
-    pa.field("content",          pa.string()),
-    pa.field("tweet_timestamp",  pa.timestamp("us", tz="UTC")),
-    pa.field("crawl_timestamp",  pa.timestamp("us", tz="UTC")),
-    pa.field("is_retweet",       pa.bool_()),
-    pa.field("has_image",        pa.bool_()),
-    pa.field("url",              pa.string()),
-    pa.field("crawl_year",       pa.int32()),
-    pa.field("crawl_month",      pa.int32()),
-    pa.field("crawl_day",        pa.int32()),
-    pa.field("tweet_year",       pa.int32()),
-    pa.field("tweet_month",      pa.int32()),
-    pa.field("tweet_day",        pa.int32()),
-])
-
 def send_cloudwatch_metrics(metrics):
     """Envía métricas a CloudWatch para monitoreo."""
     if LOCAL_TEST:
@@ -121,89 +95,6 @@ def send_cloudwatch_metrics(metrics):
             )
     except Exception as e:
         logger.error(f"Error enviando métricas a CloudWatch: {e}")
-
-def upload_parquet_to_s3(tweets, now, s3):
-    """
-    Escribe un Parquet Snappy en processed/ con el schema limpio para Athena.
-    El nombre de archivo coincide con el JSON en data/ para facilitar correlación.
-    Fallo aislado: un error aquí no corta el flujo principal.
-    """
-    crawl_ts    = now.astimezone(timezone.utc)
-    crawl_year  = now.year
-    crawl_month = now.month
-    crawl_day   = now.day
-
-    tweet_ids, user_handles, contents          = [], [], []
-    tweet_timestamps, crawl_timestamps         = [], []
-    is_retweets, has_images, urls              = [], [], []
-    c_years, c_months, c_days                  = [], [], []
-    t_years, t_months, t_days                  = [], [], []
-
-    for t in tweets:
-        url = t.get("url") or ""
-        m = URL_PATTERN.search(url)
-        user_handle = m.group(1) if m else None
-        tweet_id    = m.group(2) if m else None
-
-        date_str = t.get("date") or ""
-        try:
-            tweet_ts = datetime.fromisoformat(
-                date_str.replace("Z", "+00:00")
-            ).astimezone(timezone.utc)
-        except (ValueError, AttributeError):
-            tweet_ts = None
-
-        tweet_ids.append(tweet_id)
-        user_handles.append(user_handle)
-        contents.append(t.get("content"))
-        tweet_timestamps.append(tweet_ts)
-        crawl_timestamps.append(crawl_ts)
-        is_retweets.append(bool(t.get("is_retweet")))
-        has_images.append(bool(t.get("has_image")))
-        urls.append(url)
-        c_years.append(crawl_year)
-        c_months.append(crawl_month)
-        c_days.append(crawl_day)
-        t_years.append(tweet_ts.year   if tweet_ts else None)
-        t_months.append(tweet_ts.month if tweet_ts else None)
-        t_days.append(tweet_ts.day     if tweet_ts else None)
-
-    table = pa.table(
-        {
-            "tweet_id":        tweet_ids,
-            "user_handle":     user_handles,
-            "content":         contents,
-            "tweet_timestamp": pa.array(tweet_timestamps, type=pa.timestamp("us", tz="UTC")),
-            "crawl_timestamp": pa.array(crawl_timestamps, type=pa.timestamp("us", tz="UTC")),
-            "is_retweet":      is_retweets,
-            "has_image":       has_images,
-            "url":             urls,
-            "crawl_year":      pa.array(c_years,   type=pa.int32()),
-            "crawl_month":     pa.array(c_months,  type=pa.int32()),
-            "crawl_day":       pa.array(c_days,    type=pa.int32()),
-            "tweet_year":      pa.array(t_years,   type=pa.int32()),
-            "tweet_month":     pa.array(t_months,  type=pa.int32()),
-            "tweet_day":       pa.array(t_days,    type=pa.int32()),
-        },
-        schema=PARQUET_SCHEMA,
-    )
-
-    buf = BytesIO()
-    pq.write_table(table, buf, compression="snappy")
-
-    file_name = f"tweets_{now.strftime('%H-%M-%S')}.parquet"
-    key = f"processed/crawl_year={crawl_year}/crawl_month={crawl_month}/{file_name}"
-    
-    if LOCAL_TEST:
-        local_path = os.path.join("local_s3", key)
-        os.makedirs(os.path.dirname(local_path), exist_ok=True)
-        with open(local_path, "wb") as f:
-            f.write(buf.getvalue())
-        logger.info(f"[LOCAL TEST] Parquet escrito localmente: {local_path} ({len(tweets)} tweets)")
-    else:
-        s3.put_object(Bucket=S3_BUCKET, Key=key, Body=buf.getvalue())
-        logger.info(f"Parquet escrito: s3://{S3_BUCKET}/{key} ({len(tweets)} tweets)")
-
 
 def upload_to_s3(tweets):
     """Sube todos los tweets de la ejecución a S3 (o los guarda localmente si LOCAL_TEST es True)."""
@@ -261,12 +152,6 @@ def upload_to_s3(tweets):
 
     except Exception as e:
         logger.error(f"Error subiendo a S3 o enviando evento: {e}")
-
-    # Escribir Parquet limpio para Athena — fallo aislado, no corta el flujo principal
-    try:
-        upload_parquet_to_s3(tweets, now, s3)
-    except Exception as e:
-        logger.error(f"Error escribiendo Parquet: {e}")
 
 def save_tweets_to_db(tweets, user):
     """Guarda los tweets en DynamoDB (o local DB si LOCAL_TEST es True) con batch insert y TTL de 72hs."""
@@ -812,7 +697,7 @@ async def async_scrape_feed_with_stealth(cookies, max_tweets=100, max_idle_scrol
 
             logger.info(f"Feed scrapeado: {len(tweets)} tweets extraídos en total.")
             # "__feed__" como user para que DynamoDB indexe por modo; el user_handle real
-            # queda en el Parquet vía URL_PATTERN igual que siempre.
+            # queda en la URL del tweet dentro del JSON igual que siempre.
             nuevos = save_tweets_to_db(tweets, "__feed__")
             logger.info(f"{len(nuevos)} tweets nuevos del feed guardados.")
             todos_nuevos.extend(nuevos)

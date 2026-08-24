@@ -14,7 +14,7 @@ Flujo principal:
 EventBridge (cron)
   → Dispatcher Lambda  (¿hay que scrapear ahora?)
   → ECS Fargate Task   (Playwright stealth scraper)
-  → S3 (tweets.parquet) + EventBridge (TweetsUploaded)
+  → S3 (tweets.json) + EventBridge (TweetsUploaded)
   → Processor Lambda   (OpenAI GPT-5 → Markdown)
   → Git commit → GitHub Action → Astro build → CloudFront
 ```
@@ -53,7 +53,7 @@ terraform/      IaC completa del stack AWS
 
 ## Módulo: `scraper/`
 
-**Stack:** Python 3.12, Playwright (async), playwright-stealth, PyArrow, boto3.
+**Stack:** Python 3.12, Playwright (async), playwright-stealth, boto3.
 
 **Variables de entorno relevantes** (seteadas en `terraform/scraper_ecs.tf`):
 | Variable | Descripción |
@@ -63,7 +63,7 @@ terraform/      IaC completa del stack AWS
 | `MODO_HUMANO` | Activa delays y movimientos aleatorios |
 | `HEADLESS` | Modo headless del browser |
 | `DYNAMODB_TABLE` | Tabla de deduplicación |
-| `S3_BUCKET` | Bucket destino del parquet |
+| `S3_BUCKET` | Bucket destino del JSON de tweets |
 | `EVENT_BUS_NAME` | EventBridge bus para emitir `TweetsUploaded` |
 
 **Workflow de desarrollo local:**
@@ -74,7 +74,6 @@ docker run --env-file .env.local fintwit-scraper
 ```
 
 **Al modificar `scraper.py`:**
-- Mantener el schema Parquet definido en `PARQUET_SCHEMA` sincronizado con la tabla Athena.
 - El scraper emite el evento `TweetsUploaded` al finalizar; no quitar esa lógica.
 - Stealth: no agregar código que haga el browser detectable (headers, fingerprints).
 
@@ -95,7 +94,7 @@ Decide si el momento actual justifica un nuevo scrape y lanza el ECS task.
 - **Deploy:** push a `lambdas/dispatcher/` → `deploy-dispatcher.yml`.
 
 ### `processor/`
-Recibe el evento `TweetsUploaded`, descarga el parquet de S3, construye el prompt dinámico según el tipo de día/momento, llama a OpenAI, y commitea el Markdown al repo.
+Recibe el evento `TweetsUploaded`, descarga el JSON de S3, construye el prompt dinámico según el tipo de día/momento, llama a OpenAI, y commitea el Markdown al repo.
 
 - Los 4 prompts del sistema están en `generateAnalysisPrompt()` dentro de `index.mjs`.
 - Los tipos de día son: `Pre-Mercado`, `Media-Rueda`, `Post-Mercado`, `Fin de semana`, `Feriado Argentina`, `Feriado USA`.
@@ -185,5 +184,4 @@ Los secrets de AWS están configurados en GitHub Secrets del repo. No los toques
 - ❌ No hardcodear credenciales, API keys, ni ARNs de producción en el código.
 - ❌ No modificar los `.zip` en `lambdas/` directamente.
 - ❌ No agregar dependencias pesadas al processor sin evaluar el impacto en cold start.
-- ❌ No romper el schema Parquet sin actualizar la tabla Athena correspondiente.
 - ❌ No deployar a `prod` sin haber validado en `dev` primero.
