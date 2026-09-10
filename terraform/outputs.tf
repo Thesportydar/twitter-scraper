@@ -32,3 +32,9 @@ output "dynamodb_table_name" {
   description = "The name of the DynamoDB table"
   value       = aws_dynamodb_table.tweet.name
 }
+
+output "sns_alert_topic_arn" {
+  description = "The ARN of the SNS alert topic"
+  value       = aws_sns_topic.alerts.arn
+}
+

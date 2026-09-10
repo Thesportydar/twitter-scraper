@@ -140,6 +140,16 @@ resource "aws_iam_policy" "twitter_scraper_policy" {
           "${aws_dynamodb_table.tweet.arn}/index/*",
           aws_dynamodb_table.tweet.arn
         ]
+      },
+      {
+        "Sid" : "SNSPublishAlerts",
+        "Effect" : "Allow",
+        "Action" : [
+          "sns:Publish"
+        ],
+        "Resource" : [
+          aws_sns_topic.alerts.arn
+        ]
       }
     ]
   })

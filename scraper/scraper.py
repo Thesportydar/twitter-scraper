@@ -28,6 +28,36 @@ EVENT_BUS_NAME = os.getenv("EVENT_BUS_NAME", "default")
 LOCAL_TEST = os.getenv("LOCAL_TEST", "false").lower() in ("true", "1", "yes")
 COOKIES_FILE = "cookies.json"
 LOCAL_DB_FILE = "local_dynamodb.json"
+SNS_ALERT_TOPIC_ARN = os.getenv("SNS_ALERT_TOPIC_ARN")
+
+class AuthSessionExpiredError(Exception):
+    """Lanzada cuando las cookies están vencidas o X redirige a login/challenge."""
+    pass
+
+_alert_sent = False
+
+def send_alert_once(subject: str, message: str):
+    """Envía una notificación por SNS asegurando no spammear (máximo una por corrida)."""
+    global _alert_sent
+    if _alert_sent:
+        logger.debug(f"[ALERT SKIP] Ya se envió una alerta en esta ejecución: {subject}")
+        return
+    _alert_sent = True
+
+    if LOCAL_TEST or not SNS_ALERT_TOPIC_ARN:
+        logger.warning(f"[ALERTA SIMULADA / LOCAL]\nAsunto: {subject}\nMensaje:\n{message}")
+        return
+
+    try:
+        sns = boto3.client('sns')
+        sns.publish(
+            TopicArn=SNS_ALERT_TOPIC_ARN,
+            Subject=subject[:100],
+            Message=message
+        )
+        logger.info(f"Alerta SNS enviada exitosamente: {subject}")
+    except Exception as e:
+        logger.error(f"Error enviando alerta SNS a {SNS_ALERT_TOPIC_ARN}: {e}")
 
 def read_local_db():
     if os.path.exists(LOCAL_DB_FILE):
@@ -387,8 +417,8 @@ async def get_full_tweet_text(tweet_el, tweet_url: str, context) -> str:
     detail_page = None
     try:
         detail_page = await context.new_page()
-        await detail_page.goto(tweet_url, timeout=30000)
-        await detail_page.wait_for_selector('[data-testid="tweetText"]', timeout=15000, state="visible")
+        await detail_page.goto(tweet_url, timeout=10000)
+        await detail_page.wait_for_selector('[data-testid="tweetText"]', timeout=5000, state="visible")
         # El primer tweetText es siempre el tweet principal; los comentarios van después
         content_el = await detail_page.query_selector('[data-testid="tweetText"]')
         return (await content_el.inner_text()) if content_el else ""
@@ -448,13 +478,13 @@ async def async_scrape_multiple_users_with_stealth(user_configs, cookies, max_co
                     logger.info(f"URL tras goto: {page.url}")
                     # Si la URL no contiene el username, probablemente hubo redirección
                     if (username.lower() not in page.url.lower()) or any(x in page.url for x in ["login", "unsupported-browser", "consent", "challenge", "error"]):
-                        logger.error(f"⚠️ Redirección/bloqueo detectado para @{username} (url: {page.url}). Saltando usuario y recreando contexto.")
-                        await page.close()
-                        await context.close()
-                        context = await browser.new_context()
-                        await context.add_cookies(cookies)
-                        page = await context.new_page()
-                        raise Exception("Redirección/bloqueo detectado")
+                        msg = f"Redirección o bloqueo detectado al acceder a @{username} (URL: {page.url}). Las cookies probablemente expiraron."
+                        logger.error(f"⚠️ {msg}")
+                        send_alert_once(
+                            subject="[Twitter Scraper] Cookies expiradas o bloqueo detectado",
+                            message=f"Atención:\n\n{msg}\n\nEl scraper abortó la ejecución para evitar intentos innecesarios. Por favor renovar las cookies en SSM."
+                        )
+                        raise AuthSessionExpiredError(msg)
                     try:
                         await page.wait_for_selector("[data-testid='tweet']", timeout=30000, state="visible")
                     except Exception as e:
@@ -465,8 +495,8 @@ async def async_scrape_multiple_users_with_stealth(user_configs, cookies, max_co
                         await context.add_cookies(cookies)
                         page = await context.new_page()
                         raise Exception("No se encontró el selector de tweets")
-                    #logger.info(f"Esperando tweets de @{username}...")
-                    await asyncio.sleep(random.uniform(1.0, 3.0))
+                    # Pequeña pausa para hidratación de elementos en DOM
+                    await asyncio.sleep(random.uniform(0.4, 0.8))
                     tweets = []
                     tweet_ids = set()
                     idle_scrolls = 0
@@ -523,13 +553,16 @@ async def async_scrape_multiple_users_with_stealth(user_configs, cookies, max_co
                         else:
                             idle_scrolls = 0
                         if len(tweets) < max_tweets and idle_scrolls < max_idle_scrolls and consecutive_known < max_consecutive_known:
-                            # Scrollear siempre; modo_humano solo afecta el timing de la pausa
+                            # Scrollear siempre; pausa ágil suficiente para disparar infinite scroll
                             await page.evaluate("window.scrollBy(0, window.innerHeight)")
-                            pause = random.uniform(1.2, 2.5) if modo_humano else random.uniform(0.8, 1.5)
+                            pause = random.uniform(0.7, 1.2) if modo_humano else random.uniform(0.4, 0.8)
                             await asyncio.sleep(pause)
                     nuevos = save_tweets_to_db(tweets, username)
                     logger.info(f"{len(nuevos)} nuevos tweets para @{username}")
                     todos_nuevos.extend(nuevos)
+                except AuthSessionExpiredError as e:
+                    logger.error(f"🚨 Abortando inmediatamente la cola de usuarios por fallo de sesión/cookies: {e}")
+                    break
                 except Exception as e:
                     logger.error(f"Error scrapeando @{username} (intento {retries+1}): {e}")
                     # try:
@@ -598,11 +631,16 @@ async def async_scrape_feed_with_stealth(cookies, max_tweets=100, max_idle_scrol
             await page.goto("https://x.com/home", timeout=60000)
 
             if any(x in page.url for x in ["login", "unsupported-browser", "consent", "challenge", "error"]):
-                logger.error(f"⚠️ Bloqueo detectado al navegar a /home (url: {page.url})")
+                msg = f"Redirección o bloqueo detectado al navegar al feed /home (URL: {page.url}). Las cookies probablemente expiraron."
+                logger.error(f"⚠️ {msg}")
+                send_alert_once(
+                    subject="[Twitter Scraper] Cookies expiradas en Feed",
+                    message=f"Atención:\n\n{msg}\n\nEl scraper abortó la ejecución del feed. Por favor renovar las cookies en SSM."
+                )
                 return []
 
             await page.wait_for_selector("[data-testid='tweet']", timeout=30000, state="visible")
-            await asyncio.sleep(random.uniform(1.0, 2.0))
+            await asyncio.sleep(random.uniform(0.4, 0.8))
 
             # Intentar click en pestaña Following
             # X requiere el doble click con pausa: click → 3s → click → 3s → scraping
@@ -692,7 +730,7 @@ async def async_scrape_feed_with_stealth(cookies, max_tweets=100, max_idle_scrol
 
                 if len(tweets) < max_tweets and idle_scrolls < max_idle_scrolls:
                     await page.evaluate("window.scrollBy(0, window.innerHeight)")
-                    pause = random.uniform(1.2, 2.5) if MODO_HUMANO else random.uniform(0.8, 1.5)
+                    pause = random.uniform(0.7, 1.2) if MODO_HUMANO else random.uniform(0.4, 0.8)
                     await asyncio.sleep(pause)
 
             logger.info(f"Feed scrapeado: {len(tweets)} tweets extraídos en total.")

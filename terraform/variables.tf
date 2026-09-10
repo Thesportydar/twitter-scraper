@@ -93,3 +93,17 @@ variable "openai_model" {
   type        = string
   default     = "gpt-5.4"
 }
+
+variable "alert_email" {
+  description = "Email address to receive scraper alerts via SNS"
+  type        = string
+  default     = ""
+}
+
+variable "aws_organization_id" {
+  description = "AWS Organization ID for cross-account S3 access (e.g. Athena)"
+  type        = string
+  default     = "o-isduc5pw81"
+}
+
+

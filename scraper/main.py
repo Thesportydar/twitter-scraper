@@ -3,7 +3,12 @@ import json
 import asyncio
 import boto3
 import logging
-from scraper import async_scrape_multiple_users_with_stealth, async_scrape_feed_with_stealth, upload_to_s3
+from scraper import (
+    async_scrape_multiple_users_with_stealth,
+    async_scrape_feed_with_stealth,
+    upload_to_s3,
+    send_alert_once
+)
 
 # Configuración de Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -70,9 +75,15 @@ def setup_environment():
     try:
         cookies_json = get_ssm_parameter(cookies_param)
         cookies = json.loads(cookies_json)
+        if not cookies:
+            raise ValueError("El parámetro de cookies en SSM está vacío.")
         logger.info(f"Cookies cargadas desde SSM: {cookies_param}")
     except Exception as e:
-        logger.error(f"No se pudieron cargar las cookies. El scraper probablemente fallará. Error: {e}")
+        logger.error(f"No se pudieron cargar las cookies. Error: {e}")
+        send_alert_once(
+            subject="[Twitter Scraper] Error al cargar cookies desde SSM",
+            message=f"Atención:\n\nNo se pudieron cargar las cookies desde SSM ({cookies_param}).\nError: {e}\n\nEl scraper no podrá autenticarse."
+        )
 
     # 2. Obtener User Configs desde SSM
     config_param = os.getenv("SSM_CONFIG_PARAM", "/twitter-scraper/user-configs")

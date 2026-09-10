@@ -79,6 +79,32 @@ resource "aws_s3_bucket_policy" "scraper_policy" {
             "AWS:SourceArn" = aws_cloudfront_distribution.s3_distribution.arn
           }
         }
+      },
+      {
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = "s3:GetObject"
+        Resource = [
+          "${aws_s3_bucket.scraper.arn}/*"
+        ]
+        Condition = {
+          StringEquals = {
+            "aws:PrincipalOrgID" = var.aws_organization_id
+          }
+        }
+      },
+      {
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = "s3:ListBucket"
+        Resource = [
+          aws_s3_bucket.scraper.arn
+        ]
+        Condition = {
+          StringEquals = {
+            "aws:PrincipalOrgID" = var.aws_organization_id
+          }
+        }
       }
     ]
   })
@@ -119,3 +145,18 @@ resource "aws_dynamodb_table" "tweet" {
     enabled        = true
   }
 }
+
+//================================================================================
+// SNS Alerts
+//================================================================================
+resource "aws_sns_topic" "alerts" {
+  name = "twitter-scraper-alerts"
+}
+
+resource "aws_sns_topic_subscription" "email_alert" {
+  count     = var.alert_email != "" ? 1 : 0
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+

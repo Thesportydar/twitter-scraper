@@ -49,6 +49,10 @@
                 {
                     "name": "EVENT_BUS_NAME",
                     "value": "default"
+                },
+                {
+                    "name": "SNS_ALERT_TOPIC_ARN",
+                    "value": "arn:aws:sns:${AWS_REGION}:${AWS_ACCOUNT_ID}:twitter-scraper-alerts"
                 }
             ],
             "logConfiguration": {
